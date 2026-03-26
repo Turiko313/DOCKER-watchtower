@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Timezone
+      - TZ=${TZ:-Europe/Paris}
+      # Schedule (cron expression) – default: every day at 04:00
+      - WATCHTOWER_SCHEDULE=${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
+      # Remove old images after updating
+      - WATCHTOWER_CLEANUP=true
+      # Verbose logging
+      - WATCHTOWER_LOG_LEVEL=info
+      # Enable HTTP API (metrics + manual trigger)
+      - WATCHTOWER_HTTP_API_METRICS=true
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_API_TOKEN}
+      # Discord notifications via shoutrrr
+      - WATCHTOWER_NOTIFICATION_URL=${DISCORD_NOTIFICATION_URL}
+      # Include container name in notification
+      - WATCHTOWER_NOTIFICATIONS_HOSTNAME=${WATCHTOWER_HOSTNAME:-NAS-Watchtower}
+    ports:
+      - "8080:8080"
+    labels:
+      # Exclude watchtower itself from being updated
+      - "com.centurylinklabs.watchtower.enable=false"
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    image: watchtower-dashboard:latest
+    container_name: watchtower-dashboard
+    restart: unless-stopped
+    volumes:
+      # Read-only access to Docker socket for container info
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=${TZ:-Europe/Paris}
+      - DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY}
+      - WATCHTOWER_API_TOKEN=${WATCHTOWER_API_TOKEN}
+      - WATCHTOWER_API_URL=http://watchtower:8080
+    ports:
+      - "${DASHBOARD_PORT:-8888}:5000"
+    depends_on:
+      - watchtower
+    labels:
+      # Exclude the dashboard from being updated automatically
+      - "com.centurylinklabs.watchtower.enable=false"
