@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Persistent storage for the Watchtower installation files
+      - watchtower_data:/watchtower
     environment:
       # Timezone (system-level, not managed via UI)
       - TZ=${TZ:-Europe/Paris}
@@ -52,3 +54,5 @@ services:
 volumes:
   # Named volume so Docker manages permissions — settings persist across recreations
   watchtower_config:
+  # Named volume for the Watchtower installation files
+  watchtower_data:
