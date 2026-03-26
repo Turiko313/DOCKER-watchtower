@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Persistent storage for the Watchtower installation files
+      - watchtower_data:/watchtower
     environment:
       # Timezone (system-level, not managed via UI)
       - TZ=${TZ:-Europe/Paris}
@@ -24,13 +26,14 @@ services:
     build:
       context: ./dashboard
       dockerfile: Dockerfile
-    image: watchtower-dashboard:latest
     container_name: watchtower-dashboard
     restart: unless-stopped
     volumes:
       # Full Docker socket access required: dashboard can recreate the
       # Watchtower container when settings are changed.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Application files (bind mount for live code access)
+      - ./dashboard:/app
       # Persistent storage for Watchtower settings managed via the UI
       - watchtower_config:/config
     environment:
@@ -51,3 +54,5 @@ services:
 volumes:
   # Named volume so Docker manages permissions — settings persist across recreations
   watchtower_config:
+  # Named volume for the Watchtower installation files
+  watchtower_data:
