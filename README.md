@@ -1,54 +1,57 @@
-# 🐳 DOCKER-watchtower
+# DOCKER-watchtower
 
-Déploiement personnalisé de **[Watchtower](https://containrrr.dev/watchtower/)** avec :
+Deploiement personnalise de **[Watchtower](https://containrrr.dev/watchtower/)** avec :
 
-- 🔄 Mise à jour automatique des conteneurs Docker selon un planning configurable
-- 🖥️ Interface web locale protégée par mot de passe
-- 🔔 Notifications Discord lors des mises à jour
-- 📊 Tableau de bord : statuts, uptime, historique des mises à jour, métriques
+- Mise a jour automatique des conteneurs Docker selon un planning configurable
+- Interface web locale protegee par mot de passe
+- Notifications Discord (ou tout service shoutrrr) lors des mises a jour
+- Tableau de bord : statuts, uptime, historique des mises a jour, metriques
+- **Page Parametres** : configurez Watchtower entierement depuis le navigateur
+- **Bouton Redemarrer** : appliquez les nouveaux parametres en un clic
 
 ---
 
-## 📁 Structure du projet
+## Structure du projet
 
 ```
 DOCKER-watchtower/
 ├── docker-compose.yml          # Orchestration Watchtower + Dashboard
-├── .env.example                # Modèle des variables d'environnement
+├── .env.example                # Modele des variables d'environnement
 ├── .gitignore
 ├── dashboard/
 │   ├── Dockerfile              # Image Docker du tableau de bord
-│   ├── requirements.txt        # Dépendances Python
+│   ├── requirements.txt        # Dependances Python
 │   ├── app.py                  # Application Flask
 │   └── templates/
 │       ├── base.html
 │       ├── login.html
-│       └── dashboard.html
+│       ├── dashboard.html
+│       └── settings.html       # Page de configuration Watchtower
 └── README.md
 ```
 
 ---
 
-## 🚀 Installation
+## Installation
 
-### Méthode 1 — Ligne de commande (SSH)
+### Methode 1 — Ligne de commande (SSH)
 
-#### 1. Cloner le dépôt
+#### 1. Cloner le depot
 
 ```bash
 git clone https://github.com/Turiko313/DOCKER-watchtower.git
 cd DOCKER-watchtower
 ```
 
-#### 2. Créer le fichier `.env`
+#### 2. Creer le fichier `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-Editez `.env` et remplissez toutes les valeurs (voir section [Configuration](#-configuration)).
+Editez `.env` et remplissez toutes les valeurs (voir section [Configuration](#configuration)).
 
-#### 3. Démarrer les services
+#### 3. Demarrer les services
 
 ```bash
 docker compose up -d --build
@@ -61,23 +64,15 @@ http://<IP_DE_VOTRE_NAS>:8888
 
 ---
 
-### Méthode 2 — Interface OMV7 (plugin Compose)
+### Methode 2 — Interface OMV7 (plugin Compose)
 
-> ⚠️ Prérequis : le plugin **openmediavault-compose** doit être installé dans OMV7 (via **Système → Plugins**).
+> Prerequis : le plugin **openmediavault-compose** doit etre installe dans OMV7.
 
-#### 1. Créer le dossier et le fichier `.env`
-
-Connectez-vous en SSH à votre NAS et préparez le dossier de travail :
+#### 1. Creer le dossier et le fichier `.env`
 
 ```bash
 mkdir -p /srv/watchtower
 cd /srv/watchtower
-```
-
-Créez le fichier `.env` en vous basant sur le modèle du dépôt :
-
-```bash
-# Copiez le contenu de .env.example et adaptez les valeurs
 nano .env
 ```
 
@@ -85,111 +80,103 @@ Contenu minimal du `.env` :
 
 ```env
 TZ=Europe/Paris
-WATCHTOWER_SCHEDULE=0 0 4 * * *
-WATCHTOWER_HOSTNAME=NAS-Watchtower
 WATCHTOWER_API_TOKEN=<token_aleatoire>
-DISCORD_NOTIFICATION_URL=discord://<TOKEN>@<WEBHOOK_ID>
 DASHBOARD_USERNAME=admin
 DASHBOARD_PASSWORD=<mot_de_passe_fort>
 SECRET_KEY=<cle_secrete_aleatoire>
 DASHBOARD_PORT=8888
 ```
 
-Pour générer les tokens :
+Pour generer les tokens :
 
 ```bash
 openssl rand -hex 32
 ```
 
-#### 2. Créer le stack dans OMV7
+#### 2. Creer le stack dans OMV7
 
-1. Ouvrez l'interface web OMV7 et allez dans **Services → Compose → Fichiers**.
-2. Cliquez sur le bouton **+** (Ajouter).
-3. Renseignez les champs :
-   - **Nom** : `watchtower`
-   - **Dossier de travail** : `/srv/watchtower`
-4. Dans l'éditeur **Compose**, collez le contenu du fichier `docker-compose.yml` de ce dépôt.
-5. Cliquez sur **Enregistrer**.
+1. Allez dans **Services → Compose → Fichiers**, cliquez sur **+**.
+2. Renseignez le **Nom** (`watchtower`) et le **Dossier de travail** (`/srv/watchtower`).
+3. Collez le contenu du fichier `docker-compose.yml`, puis **Enregistrer**.
 
-#### 3. Déployer le stack
+#### 3. Deployer le stack
 
-1. Sélectionnez le stack `watchtower` dans la liste.
-2. Cliquez sur **Démarrer** (bouton ▶).
-   - OMV7 exécutera automatiquement `docker compose up -d --build` avec le `.env` présent dans le dossier de travail.
-3. Vérifiez que les conteneurs sont bien **running** dans **Services → Compose → Conteneurs**.
-
-Le tableau de bord sera accessible sur :
-```
-http://<IP_DE_VOTRE_NAS>:8888
-```
+1. Selectionnez le stack `watchtower` et cliquez sur **Demarrer**.
+2. Verifiez que les conteneurs sont **running** dans **Services → Compose → Conteneurs**.
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-Toutes les options se configurent dans le fichier `.env` :
+### Variables d'environnement (fichier `.env`)
+
+Ces variables sont statiques et ne changent pas au cours de l'utilisation :
 
 | Variable | Description | Exemple |
 |---|---|---|
 | `TZ` | Fuseau horaire | `Europe/Paris` |
-| `WATCHTOWER_SCHEDULE` | Planning cron (6 champs) | `0 0 4 * * *` (tous les jours à 4h) |
-| `WATCHTOWER_HOSTNAME` | Nom affiché dans les notifications | `NAS-Watchtower` |
-| `WATCHTOWER_API_TOKEN` | Token pour l'API HTTP Watchtower | chaîne aléatoire |
-| `DISCORD_NOTIFICATION_URL` | URL Discord au format shoutrrr | voir ci-dessous |
+| `WATCHTOWER_API_TOKEN` | Token pour l'API HTTP Watchtower | chaine aleatoire |
 | `DASHBOARD_USERNAME` | Identifiant de connexion au dashboard | `admin` |
 | `DASHBOARD_PASSWORD` | Mot de passe du dashboard | mot de passe fort |
-| `SECRET_KEY` | Clé secrète Flask | chaîne aléatoire |
-| `DASHBOARD_PORT` | Port réseau du dashboard | `8888` |
+| `SECRET_KEY` | Cle secrete Flask | chaine aleatoire |
+| `DASHBOARD_PORT` | Port reseau du dashboard | `8888` |
 
-### Générer des tokens sécurisés
+### Parametres geres par l'interface web
 
-```bash
-openssl rand -hex 32   # Pour WATCHTOWER_API_TOKEN et SECRET_KEY
-```
+Toutes les autres options Watchtower sont configurables directement dans le dashboard
+(**icone Parametres** dans la barre de navigation) et persistees dans le volume Docker
+`watchtower_config` :
 
----
+| Parametre | Description | Defaut |
+|---|---|---|
+| Planning (cron 6 champs) | Frequence des verifications | `0 0 4 * * *` (4h du matin) |
+| Nettoyage des images | Supprime les anciennes images apres mise a jour | Actif |
+| Redemarrage progressif | Redemarrage un conteneur a la fois | Inactif |
+| Conteneurs arretes | Mise a jour des conteneurs stops | Inactif |
+| Niveau de log | Verbosity des journaux | `info` |
+| URL de notification | URL shoutrrr (Discord, Telegram, Slack…) | vide |
+| Nom de l'hote | Affiche dans le titre des notifications | `NAS-Watchtower` |
 
-## 🔔 Configurer les notifications Discord
-
-1. Dans Discord, accédez aux **Paramètres du serveur → Intégrations → Webhooks**.
-2. Créez un nouveau webhook et copiez l'URL :
-   ```
-   https://discord.com/api/webhooks/<WEBHOOK_ID>/<WEBHOOK_TOKEN>
-   ```
-3. Convertissez au format **shoutrrr** :
-   ```
-   discord://<WEBHOOK_TOKEN>@<WEBHOOK_ID>
-   ```
-4. Collez cette valeur dans `.env` :
-   ```
-   DISCORD_NOTIFICATION_URL=discord://VotreToken@VotreWebhookID
-   ```
+> **Important** : apres avoir modifie et enregistre des parametres, cliquez sur
+> le bouton rouge **Redemarrer Watchtower** pour que les changements prennent effet.
+> Watchtower sera recree avec les nouveaux parametres (interruption ~5 secondes).
 
 ---
 
-## 🖥️ Interface web
+## Notifications Discord
 
-Accédez au tableau de bord à l'adresse :
+1. Dans Discord : **Parametres du serveur → Integrations → Webhooks → Nouveau webhook**.
+2. Copiez l'URL : `https://discord.com/api/webhooks/<WEBHOOK_ID>/<WEBHOOK_TOKEN>`
+3. Convertissez au format shoutrrr : `discord://<WEBHOOK_TOKEN>@<WEBHOOK_ID>`
+4. Collez cette valeur dans la page **Parametres** du dashboard.
+
+---
+
+## Interface web
+
+Acces :
 ```
 http://<IP_NAS>:8888
 ```
 
-Fonctionnalités :
-- **Statut Watchtower** : running / arrêté, uptime
-- **Métriques** : conteneurs analysés, mis à jour, en erreur
+Fonctionnalites :
+- **Statut Watchtower** : running / arrete, uptime
+- **Metriques** : conteneurs analyses, mis a jour, en erreur
 - **Liste des conteneurs** : nom, image, statut, uptime
-- **Historique** : logs filtrés de Watchtower
-- **Déclenchement manuel** : lancer une vérification immédiate via l'API Watchtower
+- **Historique** : logs filtres de Watchtower
+- **Verification immediate** : lancer une mise a jour via l'API Watchtower
+- **Redemarrage** : recree le conteneur Watchtower avec les parametres enregistres
+- **Parametres** : configurez et sauvegardez toutes les options Watchtower
 
 ---
 
-## 📋 Commandes utiles
+## Commandes utiles
 
 ```bash
-# Démarrer
+# Demarrer
 docker compose up -d --build
 
-# Arrêter
+# Arreter
 docker compose down
 
 # Voir les logs Watchtower
@@ -198,29 +185,30 @@ docker logs -f watchtower
 # Voir les logs du dashboard
 docker logs -f watchtower-dashboard
 
-# Forcer une mise à jour immédiate (si le token est configuré)
-curl -H "Authorization: Bearer <WATCHTOWER_API_TOKEN>" http://localhost:8080/v1/update
-
-# Reconstruire uniquement le dashboard après modification
+# Reconstruire uniquement le dashboard apres modification
 docker compose up -d --build dashboard
 ```
 
 ---
 
-## 🔒 Sécurité
+## Securite
 
-- L'interface est accessible **uniquement sur le réseau local** (pas d'exposition internet prévue).
-- Le socket Docker est monté **en lecture seule** (`ro`) dans le dashboard.
-- Watchtower et le dashboard sont **exclus de la surveillance automatique** via l'étiquette `com.centurylinklabs.watchtower.enable=false`.
-- Les identifiants sont stockés **uniquement dans `.env`** qui ne doit jamais être commité.
+- L'interface est accessible **uniquement sur le reseau local**.
+- Le socket Docker est monte avec acces complet dans le dashboard (necessaire pour
+  recreer le conteneur Watchtower lors d'un changement de parametres).
+- Watchtower et le dashboard sont **exclus de la surveillance automatique**
+  via l'etiquette `com.centurylinklabs.watchtower.enable=false`.
+- Les identifiants sont stockes **uniquement dans `.env`** qui ne doit jamais etre commite.
 
 ---
 
-## 🛠️ Dépannage
+## Depannage
 
-| Problème | Solution |
+| Probleme | Solution |
 |---|---|
-| Dashboard inaccessible | Vérifier le port `DASHBOARD_PORT` et le pare-feu du NAS |
-| Pas de notifications Discord | Vérifier `DISCORD_NOTIFICATION_URL` au format shoutrrr |
-| Bouton "Vérifier maintenant" en erreur | Vérifier `WATCHTOWER_API_TOKEN` dans `.env` |
-| Conteneur `watchtower` non trouvé | S'assurer que le conteneur se nomme bien `watchtower` |
+| Dashboard inaccessible | Verifier le port `DASHBOARD_PORT` et le pare-feu du NAS |
+| Pas de notifications | Verifier l'URL shoutrrr dans la page Parametres |
+| Bouton "Verifier maintenant" en erreur | Verifier `WATCHTOWER_API_TOKEN` dans `.env` |
+| Bouton "Redemarrer" en erreur | Verifier que le socket Docker n'est pas en `:ro` dans compose |
+| Parametres non enregistres | Verifier les permissions du volume Docker `watchtower_config` |
+| Conteneur `watchtower` non trouve | S'assurer que le conteneur se nomme bien `watchtower` |
