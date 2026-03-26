@@ -95,6 +95,9 @@
         <button id="btn-trigger" class="btn btn-primary" onclick="triggerUpdate()">
           <i class="bi bi-arrow-clockwise me-2"></i>Lancer une vérification maintenant
         </button>
+        <button id="btn-reboot" class="btn btn-danger" onclick="rebootWatchtower()">
+          <i class="bi bi-power me-2"></i>Redémarrer Watchtower
+        </button>
         <button class="btn btn-outline-secondary" onclick="location.reload()">
           <i class="bi bi-arrow-repeat me-2"></i>Actualiser la page
         </button>
@@ -209,6 +212,37 @@
     } finally {
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-arrow-clockwise me-2"></i>Lancer une vérification maintenant';
+    }
+  }
+
+  async function rebootWatchtower() {
+    const btn = document.getElementById('btn-reboot');
+    const msg = document.getElementById('trigger-msg');
+
+    if (!confirm('Redémarrer le conteneur Watchtower ?\nUne courte interruption (~5 sec) est normale.')) {
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Redémarrage\u2026';
+    msg.textContent = '';
+
+    try {
+      const resp = await fetch('{{ url_for("api_reboot") }}', { method: 'POST' });
+      const data = await resp.json();
+      if (data.success) {
+        msg.className = 'text-success align-self-center small';
+        msg.textContent = '✓ ' + data.message;
+      } else {
+        msg.className = 'text-danger align-self-center small';
+        msg.textContent = '✗ ' + data.message;
+      }
+    } catch (e) {
+      msg.className = 'text-danger align-self-center small';
+      msg.textContent = '✗ Impossible de contacter le serveur.';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-power me-2"></i>Redémarrer Watchtower';
     }
   }
 </script>

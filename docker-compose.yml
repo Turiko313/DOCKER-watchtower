@@ -8,22 +8,14 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      # Timezone
+      # Timezone (system-level, not managed via UI)
       - TZ=${TZ:-Europe/Paris}
-      # Schedule (cron expression) – default: every day at 04:00
-      - WATCHTOWER_SCHEDULE=${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
-      # Remove old images after updating
-      - WATCHTOWER_CLEANUP=true
-      # Verbose logging
-      - WATCHTOWER_LOG_LEVEL=info
-      # Enable HTTP API (metrics + manual trigger)
+      # HTTP API – always enabled so the dashboard can interact with Watchtower
       - WATCHTOWER_HTTP_API_METRICS=true
       - WATCHTOWER_HTTP_API_UPDATE=true
       - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_API_TOKEN}
-      # Discord notifications via shoutrrr
-      - WATCHTOWER_NOTIFICATION_URL=${DISCORD_NOTIFICATION_URL}
-      # Include container name in notification
-      - WATCHTOWER_NOTIFICATIONS_HOSTNAME=${WATCHTOWER_HOSTNAME:-NAS-Watchtower}
+      # All other options (schedule, cleanup, notifications…) are managed
+      # through the dashboard Settings page and applied on reboot.
     ports:
       - "8080:8080"
     labels:
@@ -38,8 +30,11 @@ services:
     container_name: watchtower-dashboard
     restart: unless-stopped
     volumes:
-      # Read-only access to Docker socket for container info
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Full Docker socket access required: dashboard can recreate the
+      # Watchtower container when settings are changed.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persistent storage for Watchtower settings managed via the UI
+      - watchtower_config:/config
     environment:
       - TZ=${TZ:-Europe/Paris}
       - DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
@@ -54,3 +49,7 @@ services:
     labels:
       # Exclude the dashboard from being updated automatically
       - "com.centurylinklabs.watchtower.enable=false"
+
+volumes:
+  # Named volume so Docker manages permissions — settings persist across recreations
+  watchtower_config:
