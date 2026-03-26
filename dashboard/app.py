@@ -35,7 +35,12 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 
 USERNAME = os.environ.get("DASHBOARD_USERNAME", "admin")
-_raw_password = os.environ.get("DASHBOARD_PASSWORD", "changeme")
+_raw_password = os.environ.get("DASHBOARD_PASSWORD")
+if not _raw_password:
+    raise RuntimeError(
+        "DASHBOARD_PASSWORD environment variable is not set. "
+        "Please define a strong password in your .env file."
+    )
 PASSWORD_HASH = generate_password_hash(_raw_password)
 
 WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://watchtower:8080")
