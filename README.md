@@ -31,14 +31,16 @@ DOCKER-watchtower/
 
 ## 🚀 Installation
 
-### 1. Cloner le dépôt
+### Méthode 1 — Ligne de commande (SSH)
+
+#### 1. Cloner le dépôt
 
 ```bash
 git clone https://github.com/Turiko313/DOCKER-watchtower.git
 cd DOCKER-watchtower
 ```
 
-### 2. Créer le fichier `.env`
+#### 2. Créer le fichier `.env`
 
 ```bash
 cp .env.example .env
@@ -46,11 +48,75 @@ cp .env.example .env
 
 Editez `.env` et remplissez toutes les valeurs (voir section [Configuration](#-configuration)).
 
-### 3. Démarrer les services
+#### 3. Démarrer les services
 
 ```bash
 docker compose up -d --build
 ```
+
+Le tableau de bord sera accessible sur :
+```
+http://<IP_DE_VOTRE_NAS>:8888
+```
+
+---
+
+### Méthode 2 — Interface OMV7 (plugin Compose)
+
+> ⚠️ Prérequis : le plugin **openmediavault-compose** doit être installé dans OMV7 (via **Système → Plugins**).
+
+#### 1. Créer le dossier et le fichier `.env`
+
+Connectez-vous en SSH à votre NAS et préparez le dossier de travail :
+
+```bash
+mkdir -p /srv/watchtower
+cd /srv/watchtower
+```
+
+Créez le fichier `.env` en vous basant sur le modèle du dépôt :
+
+```bash
+# Copiez le contenu de .env.example et adaptez les valeurs
+nano .env
+```
+
+Contenu minimal du `.env` :
+
+```env
+TZ=Europe/Paris
+WATCHTOWER_SCHEDULE=0 0 4 * * *
+WATCHTOWER_HOSTNAME=NAS-Watchtower
+WATCHTOWER_API_TOKEN=<token_aleatoire>
+DISCORD_NOTIFICATION_URL=discord://<TOKEN>@<WEBHOOK_ID>
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=<mot_de_passe_fort>
+SECRET_KEY=<cle_secrete_aleatoire>
+DASHBOARD_PORT=8888
+```
+
+Pour générer les tokens :
+
+```bash
+openssl rand -hex 32
+```
+
+#### 2. Créer le stack dans OMV7
+
+1. Ouvrez l'interface web OMV7 et allez dans **Services → Compose → Fichiers**.
+2. Cliquez sur le bouton **+** (Ajouter).
+3. Renseignez les champs :
+   - **Nom** : `watchtower`
+   - **Dossier de travail** : `/srv/watchtower`
+4. Dans l'éditeur **Compose**, collez le contenu du fichier `docker-compose.yml` de ce dépôt.
+5. Cliquez sur **Enregistrer**.
+
+#### 3. Déployer le stack
+
+1. Sélectionnez le stack `watchtower` dans la liste.
+2. Cliquez sur **Démarrer** (bouton ▶).
+   - OMV7 exécutera automatiquement `docker compose up -d --build` avec le `.env` présent dans le dossier de travail.
+3. Vérifiez que les conteneurs sont bien **running** dans **Services → Compose → Conteneurs**.
 
 Le tableau de bord sera accessible sur :
 ```
