@@ -76,7 +76,7 @@ def trigger_update():
         resp = http_requests.post(
             f"{WATCHTOWER_API_URL}/v1/update",
             headers={"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"},
-            timeout=10,
+            timeout=120,
         )
         if resp.status_code == 200:
             flash("Mise a jour declenchee avec succes.", "success")
