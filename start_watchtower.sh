@@ -29,6 +29,14 @@ try:
         print(f'export WATCHTOWER_LOG_LEVEL=\"{s[\"log_level\"]}\"')
     if s.get('timeout'):
         print(f'export WATCHTOWER_TIMEOUT=\"{s[\"timeout\"]}\"')
+    if s.get('notifications_discord') and s.get('discord_webhook_url'):
+        url = s['discord_webhook_url'].strip()
+        if '/api/webhooks/' in url:
+            parts = url.split('/api/webhooks/')[-1].strip('/').split('/')
+            if len(parts) == 2:
+                shoutrrr = f'discord://{parts[1]}@{parts[0]}'
+                print(f'export WATCHTOWER_NOTIFICATIONS=\"shoutrrr\"')
+                print(f'export WATCHTOWER_NOTIFICATION_URL=\"{shoutrrr}\"')
 except:
     pass
 ")

@@ -170,6 +170,8 @@ _DEFAULTS = {
     "log_level": "info",
     "no_startup_message": False,
     "timeout": "30",
+    "notifications_discord": False,
+    "discord_webhook_url": "",
 }
 
 
@@ -196,6 +198,8 @@ def _save_settings(form):
         "log_level": form.get("log_level", "info"),
         "no_startup_message": "no_startup_message" in form,
         "timeout": form.get("timeout", "30"),
+        "notifications_discord": "notifications_discord" in form,
+        "discord_webhook_url": form.get("discord_webhook_url", "").strip(),
     }
     os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(SETTINGS_FILE, "w") as fh:

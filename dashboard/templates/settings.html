@@ -72,6 +72,21 @@
     </div>
 
     <hr style="border-color:#30363d;margin:1.25rem 0">
+    <h3 style="margin-bottom:.75rem">Notifications Discord</h3>
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="notifications_discord" name="notifications_discord" {{ 'checked' if settings.notifications_discord }}>
+      <label for="notifications_discord">Activer les notifications Discord</label>
+    </div>
+
+    <div class="form-group">
+      <label for="discord_webhook_url">URL du Webhook Discord</label>
+      <input type="text" id="discord_webhook_url" name="discord_webhook_url"
+             value="{{ settings.discord_webhook_url }}"
+             placeholder="https://discord.com/api/webhooks/XXXXXXX/XXXXXXX">
+    </div>
+
+    <hr style="border-color:#30363d;margin:1.25rem 0">
 
     <button type="submit" class="btn btn-primary">Sauvegarder et redemarrer</button>
   </form>
