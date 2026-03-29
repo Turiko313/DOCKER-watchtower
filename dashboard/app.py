@@ -1,6 +1,7 @@
 import os
 import json
 import functools
+import subprocess
 
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import docker
@@ -18,7 +19,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 DASHBOARD_USERNAME = os.environ.get("DASHBOARD_USERNAME", "admin")
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "admin")
 WATCHTOWER_API_TOKEN = os.environ.get("WATCHTOWER_API_TOKEN", "")
-WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://watchtower:8080")
+WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://localhost:8080")
 CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
 
@@ -201,91 +202,22 @@ def _save_settings(form):
         json.dump(settings, fh, indent=2)
 
 
-def _settings_to_env(settings):
-    env = {}
-    if settings.get("schedule"):
-        env["WATCHTOWER_SCHEDULE"] = settings["schedule"]
-    else:
-        env["WATCHTOWER_POLL_INTERVAL"] = settings.get("poll_interval", "86400")
-    bool_map = {
-        "cleanup": "WATCHTOWER_CLEANUP",
-        "include_stopped": "WATCHTOWER_INCLUDE_STOPPED",
-        "revive_stopped": "WATCHTOWER_REVIVE_STOPPED",
-        "monitor_only": "WATCHTOWER_MONITOR_ONLY",
-        "label_enable": "WATCHTOWER_LABEL_ENABLE",
-        "rolling_restart": "WATCHTOWER_ROLLING_RESTART",
-        "no_startup_message": "WATCHTOWER_NO_STARTUP_MESSAGE",
-    }
-    for key, env_var in bool_map.items():
-        if settings.get(key):
-            env[env_var] = "true"
-    if settings.get("log_level"):
-        env["WATCHTOWER_LOG_LEVEL"] = settings["log_level"]
-    if settings.get("timeout"):
-        env["WATCHTOWER_TIMEOUT"] = settings["timeout"]
-    return env
-
-
 # ===========================================================================
-# Watchtower container recreation
+# Watchtower restart via supervisord
 # ===========================================================================
 def _restart_watchtower():
     try:
-        wt = docker_client.containers.get("watchtower")
-        attrs = wt.attrs
-
-        image = attrs["Config"]["Image"]
-        labels = attrs["Config"]["Labels"] or {}
-        binds = attrs["HostConfig"].get("Binds") or []
-        port_bindings = attrs["HostConfig"].get("PortBindings") or {}
-        restart_pol = attrs["HostConfig"].get("RestartPolicy") or {"Name": "unless-stopped"}
-        networks = list((attrs["NetworkSettings"].get("Networks") or {}).keys())
-
-        # Build new environment: keep base vars, merge dashboard settings
-        base_env = {
-            "TZ": os.environ.get("TZ", "Europe/Paris"),
-            "WATCHTOWER_HTTP_API_METRICS": "true",
-            "WATCHTOWER_HTTP_API_UPDATE": "true",
-            "WATCHTOWER_HTTP_API_TOKEN": WATCHTOWER_API_TOKEN,
-        }
-        base_env.update(_settings_to_env(_load_settings()))
-        env_list = [f"{k}={v}" for k, v in base_env.items()]
-
-        # Convert port bindings to docker-py format
-        ports = {}
-        host_ports = {}
-        for container_port, host_list in port_bindings.items():
-            ports[container_port] = None
-            if host_list:
-                hp = host_list[0]
-                host_ports[container_port] = (hp.get("HostIp", ""), int(hp["HostPort"]))
-
-        # Stop and remove old container
-        wt.stop(timeout=10)
-        wt.remove()
-
-        # Recreate
-        new_wt = docker_client.containers.run(
-            image=image,
-            name="watchtower",
-            detach=True,
-            environment=env_list,
-            volumes=binds,
-            ports=host_ports,
-            labels=labels,
-            restart_policy=restart_pol,
+        result = subprocess.run(
+            ["supervisorctl", "restart", "watchtower"],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
-
-        # Reconnect to compose network
-        for net_name in networks:
-            if net_name != "bridge":
-                try:
-                    network = docker_client.networks.get(net_name)
-                    network.connect(new_wt)
-                except Exception:
-                    pass
-
-        return True
+        if result.returncode == 0:
+            return True
+        else:
+            flash(f"Erreur supervisorctl : {result.stderr}", "error")
+            return False
     except Exception as exc:
         flash(f"Erreur lors du redemarrage de Watchtower : {exc}", "error")
         return False

@@ -1,50 +1,26 @@
 services:
-  watchtower:
-    image: ghcr.io/turiko313/watchtower:latest
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      # Timezone (system-level, not managed via UI)
-      - TZ=${TZ:-Europe/Paris}
-      # HTTP API – always enabled so the dashboard can interact with Watchtower
-      - WATCHTOWER_HTTP_API_METRICS=true
-      - WATCHTOWER_HTTP_API_UPDATE=true
-      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_API_TOKEN}
-      # All other options (schedule, cleanup, notifications…) are managed
-      # through the dashboard Settings page and applied on reboot.
-    ports:
-      - "8080:8080"
-    labels:
-      # Exclude watchtower itself from being updated
-      - "com.centurylinklabs.watchtower.enable=false"
-
-  dashboard:
+  watchtower-dashboard:
     image: ghcr.io/turiko313/watchtower-dashboard:latest
     container_name: watchtower-dashboard
     restart: unless-stopped
     volumes:
-      # Full Docker socket access required: dashboard can recreate the
-      # Watchtower container when settings are changed.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Persistent storage for Watchtower settings managed via the UI
       - watchtower_config:/config
     environment:
       - TZ=${TZ:-Europe/Paris}
+      # Watchtower API
+      - WATCHTOWER_HTTP_API_METRICS=true
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_API_TOKEN}
+      # Dashboard
       - DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
       - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
       - SECRET_KEY=${SECRET_KEY}
-      - WATCHTOWER_API_TOKEN=${WATCHTOWER_API_TOKEN}
-      - WATCHTOWER_API_URL=http://watchtower:8080
     ports:
+      - "8080:8080"
       - "${DASHBOARD_PORT:-8888}:5000"
-    depends_on:
-      - watchtower
     labels:
-      # Exclude the dashboard from being updated automatically
       - "com.centurylinklabs.watchtower.enable=false"
 
 volumes:
-  # Named volume so Docker manages permissions — settings persist across recreations
   watchtower_config:
