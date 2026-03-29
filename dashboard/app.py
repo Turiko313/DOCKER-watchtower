@@ -1,10 +1,11 @@
 import os
 import json
+import time
+import secrets
 import functools
 import subprocess
-from datetime import timedelta
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, make_response
 import docker
 import requests as http_requests
 
@@ -12,8 +13,10 @@ import requests as http_requests
 # Flask application
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
-app.permanent_session_lifetime = timedelta(days=30)
+app.secret_key = os.environ.get("SECRET_KEY") or "dev-secret-key"
+
+REMEMBER_DAYS = 30
+REMEMBER_SECONDS = REMEMBER_DAYS * 24 * 3600
 
 # ---------------------------------------------------------------------------
 # Configuration from environment
@@ -32,13 +35,63 @@ docker_client = docker.from_env(version="auto")
 
 
 # ===========================================================================
+# Remember-me token helpers (server-side, persisted on /config volume)
+# ===========================================================================
+REMEMBER_FILE = os.path.join(CONFIG_DIR, "remember_tokens.json")
+
+
+def _load_remember_tokens():
+    try:
+        with open(REMEMBER_FILE, "r") as fh:
+            tokens = json.load(fh)
+        now = time.time()
+        tokens = {k: v for k, v in tokens.items() if v > now}
+        return tokens
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_remember_tokens(tokens):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(REMEMBER_FILE, "w") as fh:
+        json.dump(tokens, fh)
+
+
+def _create_remember_token():
+    token = secrets.token_hex(32)
+    tokens = _load_remember_tokens()
+    tokens[token] = time.time() + REMEMBER_SECONDS
+    _save_remember_tokens(tokens)
+    return token
+
+
+def _validate_remember_token(token):
+    if not token:
+        return False
+    tokens = _load_remember_tokens()
+    return token in tokens and tokens[token] > time.time()
+
+
+def _delete_remember_token(token):
+    if not token:
+        return
+    tokens = _load_remember_tokens()
+    tokens.pop(token, None)
+    _save_remember_tokens(tokens)
+
+
+# ===========================================================================
 # Auth helpers
 # ===========================================================================
 def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         if not session.get("logged_in"):
-            return redirect(url_for("login"))
+            token = request.cookies.get("remember_token")
+            if _validate_remember_token(token):
+                session["logged_in"] = True
+            else:
+                return redirect(url_for("login"))
         return f(*args, **kwargs)
     return wrapper
 
@@ -52,17 +105,27 @@ def login():
         if (request.form.get("username") == DASHBOARD_USERNAME
                 and request.form.get("password") == DASHBOARD_PASSWORD):
             session["logged_in"] = True
+            resp = redirect(url_for("dashboard"))
             if request.form.get("remember_me"):
-                session.permanent = True
-            return redirect(url_for("dashboard"))
+                token = _create_remember_token()
+                resp.set_cookie(
+                    "remember_token", token,
+                    max_age=REMEMBER_SECONDS,
+                    httponly=True,
+                    samesite="Lax",
+                )
+            return resp
         flash("Identifiants incorrects.", "error")
     return render_template("login.html")
 
 
 @app.route("/logout")
 def logout():
+    _delete_remember_token(request.cookies.get("remember_token"))
     session.clear()
-    return redirect(url_for("login"))
+    resp = redirect(url_for("login"))
+    resp.delete_cookie("remember_token")
+    return resp
 
 
 @app.route("/")
