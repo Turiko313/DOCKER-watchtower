@@ -8,6 +8,7 @@ Deploiement personnalise de **[Watchtower](https://containrrr.dev/watchtower/)**
 - Tableau de bord : statuts, uptime, historique des mises a jour, metriques
 - **Page Parametres** : configurez Watchtower entierement depuis le navigateur
 - **Bouton Redemarrer** : appliquez les nouveaux parametres en un clic
+- **Se souvenir de moi** : session persistante de 30 jours pour eviter de se reconnecter
 
 ---
 
@@ -167,6 +168,7 @@ Fonctionnalites :
 - **Verification immediate** : lancer une mise a jour via l'API Watchtower
 - **Redemarrage** : recree le conteneur Watchtower avec les parametres enregistres
 - **Parametres** : configurez et sauvegardez toutes les options Watchtower
+- **Se souvenir de moi** : cochez la case a la connexion pour rester connecte 30 jours
 
 ---
 
@@ -199,6 +201,8 @@ docker compose up -d --build dashboard
 - Watchtower et le dashboard sont **exclus de la surveillance automatique**
   via l'etiquette `com.centurylinklabs.watchtower.enable=false`.
 - Les identifiants sont stockes **uniquement dans `.env`** qui ne doit jamais etre commite.
+- L'option **Se souvenir de moi** utilise un cookie de session Flask signe,
+  valable 30 jours. La session peut etre revoquee a tout moment via **Deconnexion**.
 
 ---
 

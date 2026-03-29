@@ -2,6 +2,7 @@ import os
 import json
 import functools
 import subprocess
+from datetime import timedelta
 
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import docker
@@ -12,6 +13,7 @@ import requests as http_requests
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
+app.permanent_session_lifetime = timedelta(days=30)
 
 # ---------------------------------------------------------------------------
 # Configuration from environment
@@ -50,6 +52,8 @@ def login():
         if (request.form.get("username") == DASHBOARD_USERNAME
                 and request.form.get("password") == DASHBOARD_PASSWORD):
             session["logged_in"] = True
+            if request.form.get("remember_me"):
+                session.permanent = True
             return redirect(url_for("dashboard"))
         flash("Identifiants incorrects.", "error")
     return render_template("login.html")
