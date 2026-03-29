@@ -1,5 +1,5 @@
 # =============================================================
-# Stage 1 – Build Watchtower from source
+# Stage 1 - Build Watchtower from source
 # =============================================================
 FROM golang:1.22-alpine AS builder
 
@@ -10,7 +10,7 @@ RUN git clone --depth 1 https://github.com/containrrr/watchtower.git .
 RUN CGO_ENABLED=0 go build -o /watchtower .
 
 # =============================================================
-# Stage 2 – Final image: Python + Watchtower + Dashboard
+# Stage 2 - Final image: Python + Watchtower + Dashboard
 # =============================================================
 FROM python:3.12-slim
 
@@ -22,13 +22,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /watchtower /usr/local/bin/watchtower
 RUN chmod +x /usr/local/bin/watchtower
 
+# Default Docker API version for watchtower compatibility
+ENV DOCKER_API_VERSION=1.40
+
 # Dashboard dependencies
 WORKDIR /app
-COPY dashboard/requirements.txt .
+COPY dashboard/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Dashboard code
-COPY dashboard/ .
+# Dashboard code - copy each file explicitly
+COPY dashboard/app.py ./app.py
+COPY dashboard/templates/ ./templates/
+
+# Verify files are present
+RUN ls -la /app/ && ls -la /app/templates/
 
 # Supervisor and entrypoint configs
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
