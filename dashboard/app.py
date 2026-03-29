@@ -1,7 +1,6 @@
 import os
 import json
 import functools
-from datetime import datetime
 
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import docker
