@@ -25,7 +25,7 @@ SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
 # ---------------------------------------------------------------------------
 # Docker client (socket mounted from host)
 # ---------------------------------------------------------------------------
-docker_client = docker.from_env()
+docker_client = docker.from_env(version="auto")
 
 
 # ===========================================================================
