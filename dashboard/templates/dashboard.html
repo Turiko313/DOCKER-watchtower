@@ -12,6 +12,10 @@
     <div class="label">En cours</div>
   </div>
   <div class="metric-card">
+    <div class="value">{{ containers|rejectattr('status','equalto','running')|list|length }}</div>
+    <div class="label">Arretes</div>
+  </div>
+  <div class="metric-card">
     <div class="value">{{ containers|selectattr('watchtower_enabled')|list|length }}</div>
     <div class="label">Surveilles</div>
   </div>

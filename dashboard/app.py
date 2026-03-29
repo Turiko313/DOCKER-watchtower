@@ -111,7 +111,10 @@ def _list_containers():
     containers = []
     try:
         for c in docker_client.containers.list(all=True):
-            image_name = c.image.tags[0] if c.image.tags else c.image.short_id
+            try:
+                image_name = c.image.tags[0] if c.image.tags else c.image.short_id
+            except Exception:
+                image_name = c.attrs.get("Config", {}).get("Image", "unknown")
             wt_label = c.labels.get("com.centurylinklabs.watchtower.enable")
             if wt_label is None:
                 wt_enabled = True
@@ -123,7 +126,7 @@ def _list_containers():
                 "status": c.status,
                 "id": c.short_id,
                 "watchtower_enabled": wt_enabled,
-                "created": c.attrs["Created"][:19].replace("T", " "),
+                "created": c.attrs.get("Created", "")[:19].replace("T", " "),
             })
     except Exception as exc:
         flash(f"Erreur Docker : {exc}", "error")
