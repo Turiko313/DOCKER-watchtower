@@ -26,7 +26,7 @@ SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
 # ---------------------------------------------------------------------------
 # Docker client (socket mounted from host)
 # ---------------------------------------------------------------------------
-docker_client = docker.DockerClient(base_url="unix:///var/run/docker.sock")
+docker_client = docker.from_env()
 
 
 # ===========================================================================
