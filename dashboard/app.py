@@ -18,7 +18,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 # ---------------------------------------------------------------------------
 DASHBOARD_USERNAME = os.environ.get("DASHBOARD_USERNAME", "admin")
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "admin")
-WATCHTOWER_API_TOKEN = os.environ.get("WATCHTOWER_API_TOKEN", "")
+WATCHTOWER_API_TOKEN = os.environ.get("WATCHTOWER_HTTP_API_TOKEN", "")
 WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://localhost:8080")
 CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
