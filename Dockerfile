@@ -6,8 +6,9 @@ FROM golang:1.22-alpine AS builder
 RUN apk add --no-cache git
 
 WORKDIR /src
-RUN git clone --depth 1 https://github.com/containrrr/watchtower.git .
-RUN CGO_ENABLED=0 go build -o /watchtower .
+RUN git clone https://github.com/containrrr/watchtower.git .
+RUN VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev") && \
+    CGO_ENABLED=0 go build -ldflags "-X github.com/containrrr/watchtower/internal/meta.Version=$VERSION" -o /watchtower .
 
 # =============================================================
 # Stage 2 - Final image: Python + Watchtower + Dashboard
