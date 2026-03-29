@@ -1,449 +1,299 @@
-"""
-Watchtower Dashboard - Flask web application.
-
-Provides a password-protected web interface that displays:
-  - Status of all Docker containers
-  - Watchtower operational status
-  - Update history (from Watchtower container logs)
-  - Manual update trigger via Watchtower HTTP API
-  - Settings page to configure Watchtower options (persisted to /config)
-  - One-click Watchtower container recreation to apply new settings
-"""
-
-import json
-import logging
 import os
-import re
-import secrets
-from datetime import datetime, timezone
-from functools import wraps
-from pathlib import Path
+import json
+import functools
+from datetime import datetime
 
+from flask import Flask, render_template, request, redirect, url_for, session, flash
 import docker
-import requests
-from flask import (
-    Flask,
-    flash,
-    jsonify,
-    redirect,
-    render_template,
-    request,
-    session,
-    url_for,
-)
-from werkzeug.security import check_password_hash, generate_password_hash
+import requests as http_requests
 
 # ---------------------------------------------------------------------------
-# Application setup
+# Flask application
 # ---------------------------------------------------------------------------
-
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 
-USERNAME = os.environ.get("DASHBOARD_USERNAME", "admin")
-_raw_password = os.environ.get("DASHBOARD_PASSWORD")
-if not _raw_password:
-    raise RuntimeError(
-        "DASHBOARD_PASSWORD environment variable is not set. "
-        "Please define a strong password in your .env file."
-    )
-PASSWORD_HASH = generate_password_hash(_raw_password)
-
-WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://watchtower:8080")
+# ---------------------------------------------------------------------------
+# Configuration from environment
+# ---------------------------------------------------------------------------
+DASHBOARD_USERNAME = os.environ.get("DASHBOARD_USERNAME", "admin")
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "admin")
 WATCHTOWER_API_TOKEN = os.environ.get("WATCHTOWER_API_TOKEN", "")
-
-# Path to the persistent settings file (in the named volume /config)
-CONFIG_FILE = Path(os.environ.get("WATCHTOWER_CONFIG_FILE", "/config/watchtower_settings.json"))
-
-# Default values for every configurable Watchtower option
-DEFAULT_SETTINGS = {
-    "WATCHTOWER_SCHEDULE": "0 0 4 * * *",
-    "WATCHTOWER_CLEANUP": "true",
-    "WATCHTOWER_LOG_LEVEL": "info",
-    "WATCHTOWER_NOTIFICATION_URL": "",
-    "WATCHTOWER_NOTIFICATIONS_HOSTNAME": "NAS-Watchtower",
-    "WATCHTOWER_ROLLING_RESTART": "false",
-    "WATCHTOWER_INCLUDE_STOPPED": "false",
-}
+WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://watchtower:8080")
+CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
+SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
 
 # ---------------------------------------------------------------------------
+# Docker client (socket mounted from host)
+# ---------------------------------------------------------------------------
+docker_client = docker.DockerClient(base_url="unix:///var/run/docker.sock")
+
+
+# ===========================================================================
 # Auth helpers
-# ---------------------------------------------------------------------------
-
-
+# ===========================================================================
 def login_required(f):
-    """Decorator that redirects to login if the user is not authenticated."""
-
-    @wraps(f)
-    def decorated(*args, **kwargs):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
         if not session.get("logged_in"):
             return redirect(url_for("login"))
         return f(*args, **kwargs)
-
-    return decorated
-
-
-# ---------------------------------------------------------------------------
-# Config file helpers
-# ---------------------------------------------------------------------------
+    return wrapper
 
 
-def load_settings() -> dict:
-    """Load Watchtower settings from the JSON config file.
-
-    Falls back to DEFAULT_SETTINGS for any missing key so the UI always
-    has complete data even on first run.
-    """
-    settings = dict(DEFAULT_SETTINGS)
-    try:
-        if CONFIG_FILE.exists():
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-            # Only accept known keys to avoid injecting arbitrary env vars
-            for key in DEFAULT_SETTINGS:
-                if key in data:
-                    settings[key] = data[key]
-    except Exception as exc:
-        logging.warning("Could not read config file %s: %s", CONFIG_FILE, exc)
-    return settings
-
-
-def save_settings(settings: dict) -> bool:
-    """Persist Watchtower settings to the JSON config file.
-
-    Returns True on success, False on error.
-    """
-    # Only persist known keys
-    safe = {k: settings[k] for k in DEFAULT_SETTINGS if k in settings}
-    try:
-        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(safe, indent=2, ensure_ascii=False), encoding="utf-8")
-        return True
-    except Exception as exc:
-        logging.error("Could not write config file %s: %s", CONFIG_FILE, exc)
-        return False
-
-
-# ---------------------------------------------------------------------------
-# Docker helpers
-# ---------------------------------------------------------------------------
-
-
-def get_docker_client():
-    """Return a Docker SDK client connected to the local socket."""
-    return docker.from_env()
-
-
-def _uptime_string(started_at: str) -> str:
-    """Convert an ISO-8601 timestamp to a human-readable uptime string."""
-    try:
-        # Docker timestamps end with 'Z' or a timezone offset; normalise to UTC
-        ts = re.sub(r"\.\d+", "", started_at.rstrip("Z"))
-        start = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
-        delta = datetime.now(timezone.utc) - start
-        days = delta.days
-        hours, rem = divmod(delta.seconds, 3600)
-        minutes, _ = divmod(rem, 60)
-        if days > 0:
-            return f"{days}j {hours}h {minutes}m"
-        if hours > 0:
-            return f"{hours}h {minutes}m"
-        return f"{minutes}m"
-    except Exception:
-        return "Inconnu"
-
-
-def get_containers():
-    """Return a list of dicts with information about all Docker containers."""
-    client = get_docker_client()
-    result = []
-    for c in client.containers.list(all=True):
-        tags = c.image.tags
-        image_name = tags[0] if tags else c.image.short_id
-        started_at = c.attrs.get("State", {}).get("StartedAt", "")
-        uptime = _uptime_string(started_at) if c.status == "running" else "--"
-        result.append(
-            {
-                "name": c.name,
-                "image": image_name,
-                "status": c.status,
-                "uptime": uptime,
-                "created": c.attrs.get("Created", "")[:10],
-            }
-        )
-    result.sort(key=lambda x: x["name"])
-    return result
-
-
-def get_watchtower_info():
-    """Return status information for the Watchtower container."""
-    try:
-        client = get_docker_client()
-        wt = client.containers.get("watchtower")
-        started_at = wt.attrs.get("State", {}).get("StartedAt", "")
-        return {
-            "running": wt.status == "running",
-            "status": wt.status,
-            "uptime": _uptime_string(started_at) if wt.status == "running" else "--",
-        }
-    except docker.errors.NotFound:
-        return {"running": False, "status": "introuvable", "uptime": "--"}
-    except Exception:
-        return {"running": False, "status": "erreur", "uptime": "--"}
-
-
-def get_update_history(max_lines: int = 50):
-    """Parse Watchtower container logs and return update-related lines."""
-    history = []
-    try:
-        client = get_docker_client()
-        wt = client.containers.get("watchtower")
-        raw = wt.logs(tail=200, timestamps=True).decode("utf-8", errors="replace")
-        keywords = ("Updated", "updated", "Stopping", "Starting", "Found", "Pulling")
-        for line in raw.splitlines():
-            if any(kw in line for kw in keywords):
-                # Strip ANSI escape codes
-                clean = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
-                history.append(clean)
-    except Exception:
-        pass
-    return history[-max_lines:]
-
-
-# ---------------------------------------------------------------------------
-# Watchtower API helpers
-# ---------------------------------------------------------------------------
-
-
-def _wt_headers():
-    return {"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"}
-
-
-def trigger_update():
-    """Ask Watchtower to perform an immediate update check."""
-    try:
-        resp = requests.get(
-            f"{WATCHTOWER_API_URL}/v1/update",
-            headers=_wt_headers(),
-            timeout=10,
-        )
-        return resp.status_code == 200, resp.text
-    except Exception as exc:
-        return False, str(exc)
-
-
-def get_watchtower_metrics():
-    """Fetch Prometheus metrics from Watchtower and return a dict of key values."""
-    metrics = {}
-    try:
-        resp = requests.get(
-            f"{WATCHTOWER_API_URL}/v1/metrics",
-            headers=_wt_headers(),
-            timeout=5,
-        )
-        if resp.status_code == 200:
-            for line in resp.text.splitlines():
-                if line.startswith("#") or not line.strip():
-                    continue
-                parts = line.split()
-                if len(parts) == 2:
-                    metrics[parts[0]] = parts[1]
-    except Exception:
-        pass
-    return metrics
-
-
-# ---------------------------------------------------------------------------
-# Watchtower container recreation
-# ---------------------------------------------------------------------------
-
-
-def recreate_watchtower() -> tuple:
-    """Stop, remove, and recreate the Watchtower container with updated env vars.
-
-    Static env vars (API token, HTTP API flags, timezone) are taken from the
-    current process environment; dynamic options come from the config file.
-
-    Returns (success: bool, message: str).
-    """
-    client = get_docker_client()
-
-    try:
-        container = client.containers.get("watchtower")
-    except docker.errors.NotFound:
-        return False, "Conteneur 'watchtower' introuvable."
-    except Exception as exc:
-        return False, f"Erreur Docker : {exc}"
-
-    # Capture everything we need before stopping the container
-    attrs = container.attrs
-    image = attrs["Config"]["Image"]
-    networks = list(attrs["NetworkSettings"]["Networks"].keys())
-
-    # Build the merged environment:
-    #   static  - values that must never be changed via the UI (security/connectivity)
-    #   dynamic - values saved in the settings file
-    static_env = {
-        "TZ": os.environ.get("TZ", "Europe/Paris"),
-        "WATCHTOWER_HTTP_API_METRICS": "true",
-        "WATCHTOWER_HTTP_API_UPDATE": "true",
-        "WATCHTOWER_HTTP_API_TOKEN": WATCHTOWER_API_TOKEN,
-    }
-    dynamic_env = load_settings()
-    merged = {**static_env, **dynamic_env}
-    # Drop empty values to avoid passing blank env vars to Watchtower
-    env_list = [f"{k}={v}" for k, v in merged.items() if v not in ("", None)]
-
-    try:
-        container.stop(timeout=30)
-        container.remove()
-    except Exception as exc:
-        return False, f"Impossible d'arrêter/supprimer le conteneur : {exc}"
-
-    try:
-        # Re-create connected to the first network; additional networks are
-        # added afterwards so the compose DNS alias ('watchtower') still resolves.
-        new_container = client.containers.run(
-            image=image,
-            name="watchtower",
-            detach=True,
-            restart_policy={"Name": "unless-stopped"},
-            volumes={"/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"}},
-            ports={"8080/tcp": 8080},
-            environment=env_list,
-            labels={"com.centurylinklabs.watchtower.enable": "false"},
-            network=networks[0] if networks else None,
-        )
-        # Connect to any additional networks (e.g. the compose project network)
-        for net_name in networks[1:]:
-            try:
-                net = client.networks.get(net_name)
-                net.connect(new_container)
-            except Exception:
-                pass  # non-fatal - primary network is already connected
-    except Exception as exc:
-        return False, f"Impossible de recréer le conteneur : {exc}"
-
-    return True, "Watchtower redémarré avec succès. Les nouveaux paramètres sont actifs."
-
-
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Routes
-# ---------------------------------------------------------------------------
-
-
+# ===========================================================================
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    """Login page."""
-    error = None
     if request.method == "POST":
-        username = request.form.get("username", "")
-        password = request.form.get("password", "")
-        if username == USERNAME and check_password_hash(PASSWORD_HASH, password):
+        if (request.form.get("username") == DASHBOARD_USERNAME
+                and request.form.get("password") == DASHBOARD_PASSWORD):
             session["logged_in"] = True
-            session.permanent = False
-            return redirect(url_for("index"))
-        error = "Nom d'utilisateur ou mot de passe incorrect."
-    return render_template("login.html", error=error)
+            return redirect(url_for("dashboard"))
+        flash("Identifiants incorrects.", "error")
+    return render_template("login.html")
 
 
 @app.route("/logout")
 def logout():
-    """Clear session and redirect to login."""
     session.clear()
     return redirect(url_for("login"))
 
 
 @app.route("/")
 @login_required
-def index():
-    """Main dashboard page."""
-    containers = get_containers()
-    watchtower = get_watchtower_info()
-    history = get_update_history()
-    metrics = get_watchtower_metrics()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def dashboard():
+    containers = _list_containers()
+    metrics = _get_watchtower_metrics()
+    return render_template("dashboard.html", containers=containers, metrics=metrics)
 
-    running_count = sum(1 for c in containers if c["status"] == "running")
-    stopped_count = len(containers) - running_count
 
-    # Extract relevant metrics
-    scanned = metrics.get("watchtower_containers_scanned", "--")
-    updated = metrics.get("watchtower_containers_updated", "--")
-    failed = metrics.get("watchtower_containers_failed", "--")
-
-    return render_template(
-        "dashboard.html",
-        containers=containers,
-        watchtower=watchtower,
-        history=history,
-        now=now,
-        running_count=running_count,
-        stopped_count=stopped_count,
-        scanned=scanned,
-        updated=updated,
-        failed=failed,
-    )
+@app.route("/update", methods=["POST"])
+@login_required
+def trigger_update():
+    try:
+        resp = http_requests.post(
+            f"{WATCHTOWER_API_URL}/v1/update",
+            headers={"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            flash("Mise a jour declenchee avec succes.", "success")
+        else:
+            flash(f"Watchtower a repondu avec le code {resp.status_code}.", "error")
+    except Exception as exc:
+        flash(f"Impossible de contacter Watchtower : {exc}", "error")
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
 def settings():
-    """Settings page - load and save Watchtower configuration."""
     if request.method == "POST":
-        new_settings = {
-            "WATCHTOWER_SCHEDULE": request.form.get("schedule", "0 0 4 * * *").strip(),
-            "WATCHTOWER_CLEANUP": "true" if request.form.get("cleanup") else "false",
-            "WATCHTOWER_LOG_LEVEL": request.form.get("log_level", "info"),
-            "WATCHTOWER_NOTIFICATION_URL": request.form.get("notification_url", "").strip(),
-            "WATCHTOWER_NOTIFICATIONS_HOSTNAME": request.form.get("hostname", "").strip(),
-            "WATCHTOWER_ROLLING_RESTART": "true" if request.form.get("rolling_restart") else "false",
-            "WATCHTOWER_INCLUDE_STOPPED": "true" if request.form.get("include_stopped") else "false",
-        }
-        if save_settings(new_settings):
-            flash(
-                "Paramètres enregistrés. Cliquez sur Redémarrer Watchtower pour les appliquer.",
-                "success",
-            )
-        else:
-            flash(
-                "Erreur lors de l'enregistrement. Vérifiez les permissions du volume /config.",
-                "danger",
-            )
+        _save_settings(request.form)
+        ok = _restart_watchtower()
+        if ok:
+            flash("Parametres sauvegardes. Watchtower redemarre.", "success")
         return redirect(url_for("settings"))
-
-    current = load_settings()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return render_template("settings.html", settings=current, now=now)
+    current = _load_settings()
+    return render_template("settings.html", settings=current)
 
 
-@app.route("/api/trigger", methods=["POST"])
-@login_required
-def api_trigger():
-    """Trigger an immediate Watchtower update check (AJAX endpoint)."""
-    success, message = trigger_update()
-    return jsonify({"success": success, "message": message})
+# ===========================================================================
+# Container helpers
+# ===========================================================================
+def _list_containers():
+    containers = []
+    try:
+        for c in docker_client.containers.list(all=True):
+            image_name = c.image.tags[0] if c.image.tags else c.image.short_id
+            wt_label = c.labels.get("com.centurylinklabs.watchtower.enable")
+            if wt_label is None:
+                wt_enabled = True
+            else:
+                wt_enabled = wt_label.lower() != "false"
+            containers.append({
+                "name": c.name,
+                "image": image_name,
+                "status": c.status,
+                "id": c.short_id,
+                "watchtower_enabled": wt_enabled,
+                "created": c.attrs["Created"][:19].replace("T", " "),
+            })
+    except Exception as exc:
+        flash(f"Erreur Docker : {exc}", "error")
+    containers.sort(key=lambda x: x["name"])
+    return containers
 
 
-@app.route("/api/reboot", methods=["POST"])
-@login_required
-def api_reboot():
-    """Recreate the Watchtower container with the current saved settings (AJAX endpoint)."""
-    success, message = recreate_watchtower()
-    return jsonify({"success": success, "message": message})
+# ===========================================================================
+# Watchtower metrics
+# ===========================================================================
+def _get_watchtower_metrics():
+    try:
+        resp = http_requests.get(
+            f"{WATCHTOWER_API_URL}/v1/metrics",
+            headers={"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            return _parse_prometheus(resp.text)
+    except Exception:
+        pass
+    return {}
 
 
-@app.route("/api/status")
-@login_required
-def api_status():
-    """Return a JSON snapshot of container states (for live refresh)."""
-    containers = get_containers()
-    watchtower = get_watchtower_info()
-    return jsonify({"containers": containers, "watchtower": watchtower})
+def _parse_prometheus(text):
+    metrics = {}
+    for line in text.strip().splitlines():
+        if line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) >= 2:
+            metrics[parts[0]] = parts[1]
+    return metrics
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Settings persistence
+# ===========================================================================
+_DEFAULTS = {
+    "poll_interval": "86400",
+    "schedule": "",
+    "cleanup": True,
+    "include_stopped": False,
+    "revive_stopped": False,
+    "monitor_only": False,
+    "label_enable": False,
+    "rolling_restart": False,
+    "log_level": "info",
+    "no_startup_message": False,
+    "timeout": "30",
+}
+
+
+def _load_settings():
+    settings = dict(_DEFAULTS)
+    try:
+        with open(SETTINGS_FILE, "r") as fh:
+            settings.update(json.load(fh))
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return settings
+
+
+def _save_settings(form):
+    settings = {
+        "poll_interval": form.get("poll_interval", "86400"),
+        "schedule": form.get("schedule", "").strip(),
+        "cleanup": "cleanup" in form,
+        "include_stopped": "include_stopped" in form,
+        "revive_stopped": "revive_stopped" in form,
+        "monitor_only": "monitor_only" in form,
+        "label_enable": "label_enable" in form,
+        "rolling_restart": "rolling_restart" in form,
+        "log_level": form.get("log_level", "info"),
+        "no_startup_message": "no_startup_message" in form,
+        "timeout": form.get("timeout", "30"),
+    }
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(SETTINGS_FILE, "w") as fh:
+        json.dump(settings, fh, indent=2)
+
+
+def _settings_to_env(settings):
+    env = {}
+    if settings.get("schedule"):
+        env["WATCHTOWER_SCHEDULE"] = settings["schedule"]
+    else:
+        env["WATCHTOWER_POLL_INTERVAL"] = settings.get("poll_interval", "86400")
+    bool_map = {
+        "cleanup": "WATCHTOWER_CLEANUP",
+        "include_stopped": "WATCHTOWER_INCLUDE_STOPPED",
+        "revive_stopped": "WATCHTOWER_REVIVE_STOPPED",
+        "monitor_only": "WATCHTOWER_MONITOR_ONLY",
+        "label_enable": "WATCHTOWER_LABEL_ENABLE",
+        "rolling_restart": "WATCHTOWER_ROLLING_RESTART",
+        "no_startup_message": "WATCHTOWER_NO_STARTUP_MESSAGE",
+    }
+    for key, env_var in bool_map.items():
+        if settings.get(key):
+            env[env_var] = "true"
+    if settings.get("log_level"):
+        env["WATCHTOWER_LOG_LEVEL"] = settings["log_level"]
+    if settings.get("timeout"):
+        env["WATCHTOWER_TIMEOUT"] = settings["timeout"]
+    return env
+
+
+# ===========================================================================
+# Watchtower container recreation
+# ===========================================================================
+def _restart_watchtower():
+    try:
+        wt = docker_client.containers.get("watchtower")
+        attrs = wt.attrs
+
+        image = attrs["Config"]["Image"]
+        labels = attrs["Config"]["Labels"] or {}
+        binds = attrs["HostConfig"].get("Binds") or []
+        port_bindings = attrs["HostConfig"].get("PortBindings") or {}
+        restart_pol = attrs["HostConfig"].get("RestartPolicy") or {"Name": "unless-stopped"}
+        networks = list((attrs["NetworkSettings"].get("Networks") or {}).keys())
+
+        # Build new environment: keep base vars, merge dashboard settings
+        base_env = {
+            "TZ": os.environ.get("TZ", "Europe/Paris"),
+            "WATCHTOWER_HTTP_API_METRICS": "true",
+            "WATCHTOWER_HTTP_API_UPDATE": "true",
+            "WATCHTOWER_HTTP_API_TOKEN": WATCHTOWER_API_TOKEN,
+        }
+        base_env.update(_settings_to_env(_load_settings()))
+        env_list = [f"{k}={v}" for k, v in base_env.items()]
+
+        # Convert port bindings to docker-py format
+        ports = {}
+        host_ports = {}
+        for container_port, host_list in port_bindings.items():
+            ports[container_port] = None
+            if host_list:
+                hp = host_list[0]
+                host_ports[container_port] = (hp.get("HostIp", ""), int(hp["HostPort"]))
+
+        # Stop and remove old container
+        wt.stop(timeout=10)
+        wt.remove()
+
+        # Recreate
+        new_wt = docker_client.containers.run(
+            image=image,
+            name="watchtower",
+            detach=True,
+            environment=env_list,
+            volumes=binds,
+            ports=host_ports,
+            labels=labels,
+            restart_policy=restart_pol,
+        )
+
+        # Reconnect to compose network
+        for net_name in networks:
+            if net_name != "bridge":
+                try:
+                    network = docker_client.networks.get(net_name)
+                    network.connect(new_wt)
+                except Exception:
+                    pass
+
+        return True
+    except Exception as exc:
+        flash(f"Erreur lors du redemarrage de Watchtower : {exc}", "error")
+        return False
+
+
+# ===========================================================================
 # Entry point
-# ---------------------------------------------------------------------------
-
+# ===========================================================================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000)

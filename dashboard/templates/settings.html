@@ -1,343 +1,80 @@
 {% extends "base.html" %}
-
-{% block title %}Paramètres – Watchtower{% endblock %}
-
-{% block extra_head %}
-<style>
-  .form-control, .form-select {
-    background-color: #0d1117;
-    border: 1px solid #30363d;
-    color: #c9d1d9;
-  }
-  .form-control:focus, .form-select:focus {
-    background-color: #0d1117;
-    border-color: #58a6ff;
-    color: #c9d1d9;
-    box-shadow: 0 0 0 0.2rem rgba(88, 166, 255, 0.25);
-  }
-  .form-check-input {
-    background-color: #0d1117;
-    border-color: #30363d;
-  }
-  .form-check-input:checked {
-    background-color: #1f6feb;
-    border-color: #1f6feb;
-  }
-  .form-label { color: #8b949e; font-size: 0.875rem; }
-  .form-text  { color: #6e7681; font-size: 0.775rem; }
-  .section-title {
-    color: #58a6ff;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    border-bottom: 1px solid #30363d;
-    padding-bottom: 0.4rem;
-    margin-bottom: 1rem;
-  }
-  .btn-danger-custom {
-    background-color: #da3633;
-    border-color: #da3633;
-    color: #fff;
-  }
-  .btn-danger-custom:hover {
-    background-color: #f85149;
-    border-color: #f85149;
-    color: #fff;
-  }
-  .btn-danger-custom:disabled {
-    background-color: #6e1615;
-    border-color: #6e1615;
-  }
-  .alert-success-custom {
-    background-color: #0d2818;
-    border-color: #238636;
-    color: #3fb950;
-  }
-  .alert-danger-custom {
-    background-color: #3d1f1f;
-    border-color: #da3633;
-    color: #f85149;
-  }
-</style>
-{% endblock %}
-
 {% block content %}
 
-<!-- Flash messages -->
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-    {% for category, message in messages %}
-    <div class="alert alert-{{ 'success-custom' if category == 'success' else 'danger-custom' }} alert-dismissible fade show mb-4" role="alert">
-      <i class="bi bi-{{ 'check-circle-fill' if category == 'success' else 'exclamation-triangle-fill' }} me-2"></i>
-      {{ message }}
-      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert"></button>
-    </div>
-    {% endfor %}
-  {% endif %}
-{% endwith %}
+<div class="card">
+  <h2>Parametres Watchtower</h2>
+  <p style="color:#8b949e;margin-bottom:1rem;font-size:.9rem">
+    Les modifications sont sauvegardees et Watchtower est automatiquement redemarre.
+  </p>
+  <form method="POST">
 
-<div class="row g-4">
-
-  <!-- Settings form -->
-  <div class="col-12 col-lg-8">
-    <div class="card">
-      <div class="card-header d-flex align-items-center gap-2">
-        <i class="bi bi-sliders me-1"></i> Paramètres Watchtower
-      </div>
-      <div class="card-body">
-        <form method="post" action="{{ url_for('settings') }}">
-
-          <!-- ── Scheduling ─────────────────────────────────────────────── -->
-          <p class="section-title mt-1">Planification</p>
-
-          <div class="mb-3">
-            <label for="schedule" class="form-label">Planning (cron 6 champs)</label>
-            <input
-              type="text"
-              class="form-control font-monospace"
-              id="schedule"
-              name="schedule"
-              value="{{ settings.WATCHTOWER_SCHEDULE }}"
-              placeholder="0 0 4 * * *"
-              required
-            />
-            <div class="form-text">
-              Format : <code>secondes minutes heures jour mois jourSemaine</code><br>
-              Exemples : <code>0 0 4 * * *</code> (tous les jours à 4h) &nbsp;|&nbsp;
-              <code>0 0 */6 * * *</code> (toutes les 6h) &nbsp;|&nbsp;
-              <code>0 0 4 * * 0</code> (chaque dimanche à 4h)
-            </div>
-          </div>
-
-          <!-- ── Behaviour ──────────────────────────────────────────────── -->
-          <p class="section-title mt-4">Comportement</p>
-
-          <div class="mb-3">
-            <div class="form-check form-switch">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                id="cleanup"
-                name="cleanup"
-                {% if settings.WATCHTOWER_CLEANUP == 'true' %}checked{% endif %}
-              />
-              <label class="form-check-label text-light" for="cleanup">
-                Supprimer les anciennes images apres mise a jour
-              </label>
-            </div>
-            <div class="form-text ms-4">Equivalent a <code>WATCHTOWER_CLEANUP=true</code></div>
-          </div>
-
-          <div class="mb-3">
-            <div class="form-check form-switch">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                id="rolling_restart"
-                name="rolling_restart"
-                {% if settings.WATCHTOWER_ROLLING_RESTART == 'true' %}checked{% endif %}
-              />
-              <label class="form-check-label text-light" for="rolling_restart">
-                Redémarrage progressif (un conteneur à la fois)
-              </label>
-            </div>
-            <div class="form-text ms-4">Réduit le downtime simultané pour plusieurs conteneurs</div>
-          </div>
-
-          <div class="mb-3">
-            <div class="form-check form-switch">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                id="include_stopped"
-                name="include_stopped"
-                {% if settings.WATCHTOWER_INCLUDE_STOPPED == 'true' %}checked{% endif %}
-              />
-              <label class="form-check-label text-light" for="include_stopped">
-                Mettre à jour aussi les conteneurs arrêtés
-              </label>
-            </div>
-            <div class="form-text ms-4">Equivalent a <code>WATCHTOWER_INCLUDE_STOPPED=true</code></div>
-          </div>
-
-          <!-- ── Logging ────────────────────────────────────────────────── -->
-          <p class="section-title mt-4">Journalisation</p>
-
-          <div class="mb-3">
-            <label for="log_level" class="form-label">Niveau de log</label>
-            <select class="form-select" id="log_level" name="log_level">
-              {% for level in ['panic', 'fatal', 'error', 'warn', 'info', 'debug', 'trace'] %}
-              <option value="{{ level }}" {% if settings.WATCHTOWER_LOG_LEVEL == level %}selected{% endif %}>
-                {{ level }}
-              </option>
-              {% endfor %}
-            </select>
-            <div class="form-text"><code>info</code> est recommandé en production ; <code>debug</code> pour le diagnostic</div>
-          </div>
-
-          <!-- ── Notifications ──────────────────────────────────────────── -->
-          <p class="section-title mt-4">Notifications</p>
-
-          <div class="mb-3">
-            <label for="notification_url" class="form-label">URL de notification (shoutrrr)</label>
-            <input
-              type="text"
-              class="form-control font-monospace"
-              id="notification_url"
-              name="notification_url"
-              value="{{ settings.WATCHTOWER_NOTIFICATION_URL }}"
-              placeholder="discord://token@webhook_id"
-            />
-            <div class="form-text">
-              Laisser vide pour désactiver. Format Discord :
-              <code>discord://&lt;TOKEN&gt;@&lt;WEBHOOK_ID&gt;</code><br>
-              Autres services supportés : Slack, Telegram, Gotify, SMTP…
-              Voir <a href="https://containrrr.dev/shoutrrr/services/overview/" target="_blank" class="text-info">shoutrrr docs</a>.
-            </div>
-          </div>
-
-          <div class="mb-4">
-            <label for="hostname" class="form-label">Nom de l'hote dans les notifications</label>
-            <input
-              type="text"
-              class="form-control"
-              id="hostname"
-              name="hostname"
-              value="{{ settings.WATCHTOWER_NOTIFICATIONS_HOSTNAME }}"
-              placeholder="NAS-Watchtower"
-            />
-            <div class="form-text">Apparaît dans le titre des messages envoyés</div>
-          </div>
-
-          <!-- ── Submit ─────────────────────────────────────────────────── -->
-          <div class="d-flex gap-3 flex-wrap">
-            <button type="submit" class="btn btn-primary">
-              <i class="bi bi-floppy-fill me-2"></i>Enregistrer les paramètres
-            </button>
-            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
-              <i class="bi bi-arrow-left me-1"></i>Retour au tableau de bord
-            </a>
-          </div>
-
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <!-- Reboot panel -->
-  <div class="col-12 col-lg-4">
-    <div class="card">
-      <div class="card-header d-flex align-items-center gap-2">
-        <i class="bi bi-power text-danger me-1"></i> Appliquer les paramètres
-      </div>
-      <div class="card-body">
-        <p class="text-secondary small">
-          Watchtower lit sa configuration uniquement au démarrage.
-          Après avoir enregistré vos paramètres, cliquez sur ce bouton pour
-          recréer le conteneur et appliquer les changements.
-        </p>
-        <p class="text-secondary small">
-          <i class="bi bi-info-circle me-1 text-info"></i>
-          Une courte interruption (~5 sec) est normale pendant le redémarrage.
-        </p>
-        <button id="btn-reboot" class="btn btn-danger-custom w-100 mt-1" onclick="rebootWatchtower()">
-          <i class="bi bi-arrow-counterclockwise me-2"></i>Redémarrer Watchtower
-        </button>
-        <div id="reboot-msg" class="mt-3 small"></div>
-      </div>
+    <div class="form-group">
+      <label for="schedule">Planification cron (prioritaire sur l'intervalle)</label>
+      <input type="text" id="schedule" name="schedule" value="{{ settings.schedule }}"
+             placeholder="Ex: 0 0 4 * * * (tous les jours a 4h)">
     </div>
 
-    <!-- Current settings summary -->
-    <div class="card mt-3">
-      <div class="card-header">
-        <i class="bi bi-list-check me-1"></i> Paramètres actifs
-      </div>
-      <div class="card-body">
-        <dl class="mb-0" style="font-size:.8rem;">
-          <dt class="text-secondary">Planning</dt>
-          <dd class="font-monospace text-light mb-2">{{ settings.WATCHTOWER_SCHEDULE }}</dd>
-
-          <dt class="text-secondary">Nettoyage images</dt>
-          <dd class="mb-2">
-            {% if settings.WATCHTOWER_CLEANUP == 'true' %}
-              <span class="badge bg-success">Actif</span>
-            {% else %}
-              <span class="badge bg-secondary">Inactif</span>
-            {% endif %}
-          </dd>
-
-          <dt class="text-secondary">Redémarrage progressif</dt>
-          <dd class="mb-2">
-            {% if settings.WATCHTOWER_ROLLING_RESTART == 'true' %}
-              <span class="badge bg-success">Actif</span>
-            {% else %}
-              <span class="badge bg-secondary">Inactif</span>
-            {% endif %}
-          </dd>
-
-          <dt class="text-secondary">Conteneurs arrêtés</dt>
-          <dd class="mb-2">
-            {% if settings.WATCHTOWER_INCLUDE_STOPPED == 'true' %}
-              <span class="badge bg-success">Inclus</span>
-            {% else %}
-              <span class="badge bg-secondary">Exclus</span>
-            {% endif %}
-          </dd>
-
-          <dt class="text-secondary">Niveau de log</dt>
-          <dd class="font-monospace text-light mb-2">{{ settings.WATCHTOWER_LOG_LEVEL }}</dd>
-
-          <dt class="text-secondary">Notifications</dt>
-          <dd class="mb-2">
-            {% if settings.WATCHTOWER_NOTIFICATION_URL %}
-              <span class="badge bg-success">Configurées</span>
-            {% else %}
-              <span class="badge bg-secondary">Désactivées</span>
-            {% endif %}
-          </dd>
-
-          <dt class="text-secondary">Hôte</dt>
-          <dd class="text-light mb-0">{{ settings.WATCHTOWER_NOTIFICATIONS_HOSTNAME }}</dd>
-        </dl>
-      </div>
+    <div class="form-group">
+      <label for="poll_interval">Intervalle de verification (secondes)</label>
+      <input type="number" id="poll_interval" name="poll_interval"
+             value="{{ settings.poll_interval }}" min="60">
     </div>
-  </div>
 
+    <div class="form-group">
+      <label for="log_level">Niveau de log</label>
+      <select id="log_level" name="log_level">
+        {% for lvl in ['debug','info','warn','error','fatal','panic'] %}
+        <option value="{{ lvl }}" {{ 'selected' if settings.log_level == lvl }}>{{ lvl }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="timeout">Timeout de mise a jour (secondes)</label>
+      <input type="number" id="timeout" name="timeout" value="{{ settings.timeout }}" min="10">
+    </div>
+
+    <hr style="border-color:#30363d;margin:1.25rem 0">
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="cleanup" name="cleanup" {{ 'checked' if settings.cleanup }}>
+      <label for="cleanup">Supprimer les anciennes images apres mise a jour</label>
+    </div>
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="include_stopped" name="include_stopped" {{ 'checked' if settings.include_stopped }}>
+      <label for="include_stopped">Inclure les conteneurs arretes</label>
+    </div>
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="revive_stopped" name="revive_stopped" {{ 'checked' if settings.revive_stopped }}>
+      <label for="revive_stopped">Redemarrer les conteneurs arretes apres mise a jour</label>
+    </div>
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="monitor_only" name="monitor_only" {{ 'checked' if settings.monitor_only }}>
+      <label for="monitor_only">Mode surveillance uniquement (pas de mise a jour automatique)</label>
+    </div>
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="label_enable" name="label_enable" {{ 'checked' if settings.label_enable }}>
+      <label for="label_enable">Surveiller uniquement les conteneurs avec le label watchtower</label>
+    </div>
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="rolling_restart" name="rolling_restart" {{ 'checked' if settings.rolling_restart }}>
+      <label for="rolling_restart">Redemarrage progressif (rolling restart)</label>
+    </div>
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="no_startup_message" name="no_startup_message" {{ 'checked' if settings.no_startup_message }}>
+      <label for="no_startup_message">Desactiver le message de demarrage</label>
+    </div>
+
+    <hr style="border-color:#30363d;margin:1.25rem 0">
+
+    <button type="submit" class="btn btn-primary">Sauvegarder et redemarrer</button>
+  </form>
 </div>
-{% endblock %}
 
-{% block extra_scripts %}
-<script>
-  async function rebootWatchtower() {
-    const btn = document.getElementById('btn-reboot');
-    const msg = document.getElementById('reboot-msg');
-
-    if (!confirm('Redémarrer le conteneur Watchtower ?\nUne courte interruption (~5 sec) est normale.')) {
-      return;
-    }
-
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Redémarrage en cours...';
-    msg.textContent = '';
-
-    try {
-      const resp = await fetch('{{ url_for("api_reboot") }}', { method: 'POST' });
-      const data = await resp.json();
-      if (data.success) {
-        msg.className = 'mt-3 small text-success';
-        msg.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>' + data.message;
-      } else {
-        msg.className = 'mt-3 small text-danger';
-        msg.innerHTML = '<i class="bi bi-x-circle-fill me-1"></i>' + data.message;
-      }
-    } catch (e) {
-      msg.className = 'mt-3 small text-danger';
-      msg.innerHTML = '<i class="bi bi-x-circle-fill me-1"></i>Impossible de contacter le serveur.';
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-2"></i>Redémarrer Watchtower';
-    }
-  }
-</script>
 {% endblock %}

@@ -1,6 +1,6 @@
 services:
   watchtower:
-    image: ghcr.io/turiko313/watchtower-dashboard:latest    
+    image: ghcr.io/turiko313/watchtower-dashboard:latest
     container_name: watchtower
     restart: unless-stopped
     volumes:
