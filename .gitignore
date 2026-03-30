@@ -15,9 +15,10 @@ env/
 # Docker build cache
 .dockerignore
 
-# Editor files
+# Editor / IDE files
 .vscode/
 .idea/
+.vs/
 *.swp
 *.swo
 

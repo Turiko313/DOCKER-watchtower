@@ -5,7 +5,7 @@ import secrets
 import functools
 import subprocess
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash, make_response
+from flask import Flask, render_template, request, redirect, url_for, session, flash
 import docker
 import requests as http_requests
 
@@ -86,9 +86,14 @@ def _delete_remember_token(token):
 def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
-        if not session.get("logged_in"):
-            return redirect(url_for("login"))
-        return f(*args, **kwargs)
+        if session.get("logged_in"):
+            return f(*args, **kwargs)
+        # Fallback: try remember-me token (covers lost session cookie)
+        token = request.cookies.get("remember_token")
+        if _validate_remember_token(token):
+            session["logged_in"] = True
+            return f(*args, **kwargs)
+        return redirect(url_for("login"))
     return wrapper
 
 
@@ -97,7 +102,7 @@ def _auto_login_from_remember_token():
     """Auto-login from remember-me cookie before any route runs."""
     if session.get("logged_in"):
         return
-    if request.endpoint in ("login", "static"):
+    if not request.endpoint or request.endpoint in ("login", "static"):
         return
     token = request.cookies.get("remember_token")
     if _validate_remember_token(token):
@@ -175,7 +180,7 @@ def trigger_update():
         resp = http_requests.post(
             f"{WATCHTOWER_API_URL}/v1/update",
             headers={"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"},
-            timeout=120,
+            timeout=30,
         )
         if resp.status_code == 200:
             flash("Mise a jour declenchee avec succes.", "success")
