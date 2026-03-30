@@ -361,7 +361,19 @@ def _restart_watchtower():
             timeout=30,
         )
         if result.returncode == 0:
-            return True
+            # Verify watchtower is actually running after restart
+            time.sleep(2)
+            check = subprocess.run(
+                ["supervisorctl", "status", "watchtower"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if "RUNNING" in check.stdout:
+                return True
+            else:
+                flash(f"Watchtower redemarre mais statut inattendu : {check.stdout.strip()}", "error")
+                return False
         else:
             flash(f"Erreur supervisorctl : {result.stderr}", "error")
             return False
