@@ -87,13 +87,41 @@ def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         if not session.get("logged_in"):
-            token = request.cookies.get("remember_token")
-            if _validate_remember_token(token):
-                session["logged_in"] = True
-            else:
-                return redirect(url_for("login"))
+            return redirect(url_for("login"))
         return f(*args, **kwargs)
     return wrapper
+
+
+@app.before_request
+def _auto_login_from_remember_token():
+    """Auto-login from remember-me cookie before any route runs."""
+    if session.get("logged_in"):
+        return
+    if request.endpoint in ("login", "static"):
+        return
+    token = request.cookies.get("remember_token")
+    if _validate_remember_token(token):
+        session["logged_in"] = True
+
+
+@app.after_request
+def _refresh_remember_cookie(response):
+    """Renew the remember-me cookie when less than 7 days remain (rolling window)."""
+    token = request.cookies.get("remember_token")
+    if token and session.get("logged_in"):
+        tokens = _load_remember_tokens()
+        expiry = tokens.get(token, 0)
+        remaining = expiry - time.time()
+        if 0 < remaining < 7 * 86400:
+            tokens[token] = time.time() + REMEMBER_SECONDS
+            _save_remember_tokens(tokens)
+            response.set_cookie(
+                "remember_token", token,
+                max_age=REMEMBER_SECONDS,
+                httponly=True,
+                samesite="Lax",
+            )
+    return response
 
 
 # ===========================================================================
@@ -133,7 +161,8 @@ def logout():
 def dashboard():
     containers = _list_containers()
     metrics = _get_watchtower_metrics()
-    return render_template("dashboard.html", containers=containers, metrics=metrics)
+    update_statuses = _get_update_statuses()
+    return render_template("dashboard.html", containers=containers, metrics=metrics, update_statuses=update_statuses)
 
 
 @app.route("/update", methods=["POST"])
@@ -198,6 +227,33 @@ def _list_containers():
 
 
 # ===========================================================================
+# Update statuses from watchtower logs (last 24 h)
+# ===========================================================================
+def _get_update_statuses():
+    """Parse watchtower logs (last 24 h) for updated / failed containers."""
+    statuses = {}
+    try:
+        wt = docker_client.containers.get("watchtower-dashboard")
+        logs = wt.logs(since=int(time.time()) - 86400, stdout=True, stderr=True)
+        for line in logs.decode("utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line.startswith("Creating /"):
+                name = line[len("Creating /"):].strip()
+                if name:
+                    statuses[name] = "updated"
+            elif "Unable to update container" in line:
+                try:
+                    name = line.split('"')[1].lstrip("/")
+                    if name:
+                        statuses[name] = "failed"
+                except (IndexError, ValueError):
+                    pass
+    except Exception:
+        pass
+    return statuses
+
+
+# ===========================================================================
 # Watchtower metrics
 # ===========================================================================
 def _get_watchtower_metrics():
@@ -256,8 +312,22 @@ def _load_settings():
 
 
 def _save_settings(form):
+    try:
+        poll_interval = str(max(60, int(form.get("poll_interval") or 86400)))
+    except (ValueError, TypeError):
+        poll_interval = "86400"
+
+    try:
+        timeout = str(max(10, int(form.get("timeout") or 30)))
+    except (ValueError, TypeError):
+        timeout = "30"
+
+    log_level = form.get("log_level", "info")
+    if log_level not in ("debug", "info", "warn", "error", "fatal", "panic"):
+        log_level = "info"
+
     settings = {
-        "poll_interval": form.get("poll_interval", "86400"),
+        "poll_interval": poll_interval,
         "schedule": form.get("schedule", "").strip(),
         "cleanup": "cleanup" in form,
         "include_stopped": "include_stopped" in form,
@@ -265,9 +335,9 @@ def _save_settings(form):
         "monitor_only": "monitor_only" in form,
         "label_enable": "label_enable" in form,
         "rolling_restart": "rolling_restart" in form,
-        "log_level": form.get("log_level", "info"),
+        "log_level": log_level,
         "no_startup_message": "no_startup_message" in form,
-        "timeout": form.get("timeout", "30"),
+        "timeout": timeout,
         "notifications_discord": "notifications_discord" in form,
         "discord_webhook_url": form.get("discord_webhook_url", "").strip(),
     }

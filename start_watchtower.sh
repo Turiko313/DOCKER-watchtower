@@ -21,22 +21,37 @@ try:
     with open(SETTINGS_FILE) as f:
         s = json.load(f)
 
-    # Schedule or poll interval
-    if s.get("schedule"):
-        os.environ["WATCHTOWER_SCHEDULE"] = s["schedule"]
+    # Schedule or poll interval (mutually exclusive)
+    schedule = s.get("schedule", "").strip()
+    if schedule:
+        os.environ["WATCHTOWER_SCHEDULE"] = schedule
+        os.environ.pop("WATCHTOWER_POLL_INTERVAL", None)
     else:
-        os.environ["WATCHTOWER_POLL_INTERVAL"] = s.get("poll_interval", "86400")
+        os.environ.pop("WATCHTOWER_SCHEDULE", None)
+        try:
+            poll = str(max(60, int(s.get("poll_interval", 86400))))
+        except (ValueError, TypeError):
+            poll = "86400"
+        os.environ["WATCHTOWER_POLL_INTERVAL"] = poll
 
-    # Boolean flags
+    # Boolean flags (explicitly clean when False)
     for key, env_var in BOOL_SETTINGS.items():
         if s.get(key):
             os.environ[env_var] = "true"
+        else:
+            os.environ.pop(env_var, None)
 
-    # Log level and timeout
-    if s.get("log_level"):
-        os.environ["WATCHTOWER_LOG_LEVEL"] = s["log_level"]
-    if s.get("timeout"):
-        os.environ["WATCHTOWER_TIMEOUT"] = s["timeout"]
+    # Log level (validated)
+    log_level = s.get("log_level", "info")
+    if log_level in ("debug", "info", "warn", "error", "fatal", "panic"):
+        os.environ["WATCHTOWER_LOG_LEVEL"] = log_level
+
+    # Timeout (validated)
+    try:
+        timeout = str(max(10, int(s.get("timeout", 30))))
+    except (ValueError, TypeError):
+        timeout = "30"
+    os.environ["WATCHTOWER_TIMEOUT"] = timeout
 
     # Discord notifications via shoutrrr
     if s.get("notifications_discord") and s.get("discord_webhook_url"):
@@ -46,6 +61,9 @@ try:
             if len(parts) == 2:
                 os.environ["WATCHTOWER_NOTIFICATIONS"] = "shoutrrr"
                 os.environ["WATCHTOWER_NOTIFICATION_URL"] = f"discord://{parts[1]}@{parts[0]}"
+    else:
+        os.environ.pop("WATCHTOWER_NOTIFICATIONS", None)
+        os.environ.pop("WATCHTOWER_NOTIFICATION_URL", None)
 except (FileNotFoundError, json.JSONDecodeError, Exception) as exc:
     print(f"[start_watchtower] Warning: could not load settings: {exc}", file=sys.stderr)
 

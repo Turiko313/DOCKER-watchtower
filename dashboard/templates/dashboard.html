@@ -43,9 +43,10 @@
 <div class="card">
   <div style="display:flex;align-items:center;justify-content:space-between">
     <h2>Mise a jour manuelle</h2>
-    <form method="POST" action="{{ url_for('trigger_update') }}">
-      <button type="submit" class="btn btn-primary" onclick="return confirm('Lancer une verification de mises a jour ?')">
-        Verifier maintenant
+    <form method="POST" action="{{ url_for('trigger_update') }}" id="updateForm">
+      <button type="submit" class="btn btn-primary" id="updateBtn">
+        <span id="updateText">Verifier maintenant</span>
+        <span id="updateSpinner" class="spinner" style="display:none"></span>
       </button>
     </form>
   </div>
@@ -80,7 +81,13 @@
         </td>
         <td>
           {% if c.watchtower_enabled %}
-            <span class="badge yes">oui</span>
+            {% if update_statuses.get(c.name) == 'updated' %}
+              <span class="badge yes glow-green" title="Mis a jour dans les 24h">oui ✓</span>
+            {% elif update_statuses.get(c.name) == 'failed' %}
+              <span class="badge yes glow-red" title="Echec de mise a jour">oui ✗</span>
+            {% else %}
+              <span class="badge yes">oui</span>
+            {% endif %}
           {% else %}
             <span class="badge no">non</span>
           {% endif %}
@@ -91,5 +98,18 @@
     </tbody>
   </table>
 </div>
+
+<script>
+document.getElementById('updateForm').addEventListener('submit', function(e) {
+  if (!confirm('Lancer une verification de mises a jour ?')) {
+    e.preventDefault();
+    return;
+  }
+  document.getElementById('updateText').textContent = 'Verification en cours\u2026';
+  document.getElementById('updateSpinner').style.display = 'inline-block';
+  document.getElementById('updateBtn').disabled = true;
+  document.getElementById('updateBtn').style.opacity = '0.7';
+});
+</script>
 
 {% endblock %}
