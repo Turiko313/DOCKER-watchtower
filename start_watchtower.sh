@@ -49,4 +49,22 @@ try:
 except (FileNotFoundError, json.JSONDecodeError, Exception) as exc:
     print(f"[start_watchtower] Warning: could not load settings: {exc}", file=sys.stderr)
 
+# ---------------------------------------------------------------------------
+# GHCR private registry authentication
+# ---------------------------------------------------------------------------
+import base64
+
+ghcr_user = os.environ.get("GHCR_USERNAME", "").strip()
+ghcr_token = os.environ.get("GHCR_TOKEN", "").strip()
+
+if ghcr_user and ghcr_token:
+    docker_cfg_dir = "/config/docker-config"
+    os.makedirs(docker_cfg_dir, exist_ok=True)
+    auth_str = base64.b64encode(f"{ghcr_user}:{ghcr_token}".encode()).decode()
+    cfg = {"auths": {"ghcr.io": {"auth": auth_str}}}
+    with open(os.path.join(docker_cfg_dir, "config.json"), "w") as f:
+        json.dump(cfg, f)
+    os.environ["DOCKER_CONFIG"] = docker_cfg_dir
+    print("[start_watchtower] GHCR auth configured.", file=sys.stderr)
+
 os.execv("/usr/local/bin/watchtower", ["/usr/local/bin/watchtower"])

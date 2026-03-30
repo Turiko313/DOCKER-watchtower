@@ -121,6 +121,14 @@ Ces variables sont statiques et ne changent pas au cours de l'utilisation :
 | `DASHBOARD_PASSWORD` | Mot de passe du dashboard | mot de passe fort |
 | `SECRET_KEY` | Cle secrete Flask | chaine aleatoire |
 | `DASHBOARD_PORT` | Port reseau du dashboard | `8888` |
+| `GHCR_USERNAME` | *(optionnel)* Nom d'utilisateur GitHub pour images privees GHCR | `Turiko313` |
+| `GHCR_TOKEN` | *(optionnel)* PAT GitHub avec scope `read:packages` | `ghp_xxxx…` |
+
+> **Images privees GHCR** : si certains de vos conteneurs utilisent des images privees
+> hebergees sur `ghcr.io`, renseignez `GHCR_USERNAME` et `GHCR_TOKEN` pour que
+> Watchtower puisse verifier les mises a jour. Creez un PAT sur
+> [github.com/settings/tokens](https://github.com/settings/tokens) avec le scope
+> **read:packages**.
 
 ### Parametres geres par l'interface web
 
@@ -216,3 +224,4 @@ docker compose up -d --build dashboard
 | Bouton "Redemarrer" en erreur | Verifier que le socket Docker n'est pas en `:ro` dans compose |
 | Parametres non enregistres | Verifier les permissions du volume Docker `watchtower_config` |
 | Conteneur `watchtower` non trouve | S'assurer que le conteneur se nomme bien `watchtower` |
+| Image privee GHCR `unauthorized` | Renseigner `GHCR_USERNAME` et `GHCR_TOKEN` dans `.env` (PAT avec `read:packages`) |

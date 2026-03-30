@@ -17,6 +17,9 @@ services:
       - DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
       - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
       - SECRET_KEY=${SECRET_KEY}
+      # GHCR private registry (optional)
+      - GHCR_USERNAME=${GHCR_USERNAME:-}
+      - GHCR_TOKEN=${GHCR_TOKEN:-}
     ports:
       - "8080:8080"
       - "${DASHBOARD_PORT:-8888}:5000"
