@@ -37,6 +37,13 @@
     <div class="label">Scans ignores</div>
   </div>
   {% endif %}
+  {% set failed_count = update_statuses.values()|select('equalto','failed')|list|length %}
+  {% if failed_count > 0 %}
+  <div class="metric-card" style="border-color:#da3633">
+    <div class="value" style="color:#f85149">{{ failed_count }}</div>
+    <div class="label">Erreurs</div>
+  </div>
+  {% endif %}
 </div>
 
 <!-- Trigger update -->
@@ -66,34 +73,77 @@
       </tr>
     </thead>
     <tbody>
-      {% for c in containers %}
-      <tr>
-        <td><strong>{{ c.name }}</strong></td>
-        <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
-        <td>
-          {% if c.status == 'running' %}
-            <span class="badge running">running</span>
-          {% elif c.status == 'exited' %}
-            <span class="badge exited">exited</span>
-          {% else %}
-            <span class="badge paused">{{ c.status }}</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if c.watchtower_enabled %}
-            {% if update_statuses.get(c.name) == 'updated' %}
-              <span class="badge yes glow-green" title="Mis a jour dans les 24h">oui ✓</span>
-            {% elif update_statuses.get(c.name) == 'failed' %}
-              <span class="badge yes glow-red" title="Echec de mise a jour">oui ✗</span>
-            {% else %}
-              <span class="badge yes">oui</span>
-            {% endif %}
-          {% else %}
-            <span class="badge no">non</span>
-          {% endif %}
-        </td>
-        <td style="font-size:.85rem;color:#8b949e">{{ c.created }}</td>
-      </tr>
+      {% set ns = namespace(gid=0) %}
+      {% for image, group in grouped.items() %}
+        {% if group|length == 1 %}
+          {% set c = group[0] %}
+          <tr>
+            <td><strong>{{ c.name }}</strong></td>
+            <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
+            <td>
+              {% if c.status == 'running' %}
+                <span class="badge running">running</span>
+              {% elif c.status == 'exited' %}
+                <span class="badge exited">exited</span>
+              {% else %}
+                <span class="badge paused">{{ c.status }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if c.watchtower_enabled %}
+                {% if update_statuses.get(c.name) == 'updated' %}
+                  <span class="badge yes glow-green" title="Mis a jour dans les 24h">oui ✓</span>
+                {% elif update_statuses.get(c.name) == 'failed' %}
+                  <span class="badge yes glow-red" title="Echec de mise a jour">oui ✗</span>
+                {% else %}
+                  <span class="badge yes">oui</span>
+                {% endif %}
+              {% else %}
+                <span class="badge no">non</span>
+              {% endif %}
+            </td>
+            <td style="font-size:.85rem;color:#8b949e">{{ c.created }}</td>
+          </tr>
+        {% else %}
+          {% set ns.gid = ns.gid + 1 %}
+          {% set running = group|selectattr('status','equalto','running')|list|length %}
+          <tr class="group-header" data-group="{{ ns.gid }}">
+            <td><strong>▶ {{ group|length }} conteneurs</strong></td>
+            <td style="font-size:.85rem;color:#8b949e">{{ image }}</td>
+            <td><span class="badge running">{{ running }}/{{ group|length }}</span></td>
+            <td></td>
+            <td></td>
+          </tr>
+          {% for c in group %}
+          <tr class="group-child" data-group="{{ ns.gid }}" style="display:none">
+            <td style="padding-left:2rem">↳ <strong>{{ c.name }}</strong></td>
+            <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
+            <td>
+              {% if c.status == 'running' %}
+                <span class="badge running">running</span>
+              {% elif c.status == 'exited' %}
+                <span class="badge exited">exited</span>
+              {% else %}
+                <span class="badge paused">{{ c.status }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if c.watchtower_enabled %}
+                {% if update_statuses.get(c.name) == 'updated' %}
+                  <span class="badge yes glow-green" title="Mis a jour dans les 24h">oui ✓</span>
+                {% elif update_statuses.get(c.name) == 'failed' %}
+                  <span class="badge yes glow-red" title="Echec de mise a jour">oui ✗</span>
+                {% else %}
+                  <span class="badge yes">oui</span>
+                {% endif %}
+              {% else %}
+                <span class="badge no">non</span>
+              {% endif %}
+            </td>
+            <td style="font-size:.85rem;color:#8b949e">{{ c.created }}</td>
+          </tr>
+          {% endfor %}
+        {% endif %}
       {% endfor %}
     </tbody>
   </table>
@@ -109,6 +159,16 @@ document.getElementById('updateForm').addEventListener('submit', function(e) {
   document.getElementById('updateSpinner').style.display = 'inline-block';
   document.getElementById('updateBtn').disabled = true;
   document.getElementById('updateBtn').style.opacity = '0.7';
+});
+document.querySelectorAll('.group-header').forEach(function(header) {
+  header.addEventListener('click', function() {
+    var gid = this.dataset.group;
+    var rows = document.querySelectorAll('.group-child[data-group="' + gid + '"]');
+    var label = this.querySelector('td strong');
+    var open = rows[0] && rows[0].style.display !== 'none';
+    rows.forEach(function(r) { r.style.display = open ? 'none' : ''; });
+    label.textContent = label.textContent.replace(open ? '\u25bc' : '\u25b6', open ? '\u25b6' : '\u25bc');
+  });
 });
 </script>
 

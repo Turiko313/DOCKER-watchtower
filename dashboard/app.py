@@ -162,7 +162,10 @@ def dashboard():
     containers = _list_containers()
     metrics = _get_watchtower_metrics()
     update_statuses = _get_update_statuses()
-    return render_template("dashboard.html", containers=containers, metrics=metrics, update_statuses=update_statuses)
+    grouped = {}
+    for c in containers:
+        grouped.setdefault(c["image"], []).append(c)
+    return render_template("dashboard.html", containers=containers, metrics=metrics, update_statuses=update_statuses, grouped=grouped)
 
 
 @app.route("/update", methods=["POST"])
