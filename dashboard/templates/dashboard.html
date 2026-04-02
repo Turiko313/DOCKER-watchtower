@@ -12,20 +12,9 @@
     <div class="label">En cours</div>
   </div>
   <div class="metric-card">
-    <div class="value">{{ containers|rejectattr('status','equalto','running')|rejectattr('status','equalto','removed')|rejectattr('status','equalto','down')|list|length }}</div>
+    <div class="value">{{ containers|rejectattr('status','equalto','running')|list|length }}</div>
     <div class="label">Arrêtés</div>
   </div>
-  <div class="metric-card">
-    <div class="value">{{ containers|selectattr('status','equalto','removed')|list|length }}</div>
-    <div class="label">Supprimés</div>
-  </div>
-  {% set down_count = containers|selectattr('status','equalto','down')|list|length %}
-  {% if down_count > 0 %}
-  <div class="metric-card">
-    <div class="value">{{ down_count }}</div>
-    <div class="label">Inactifs</div>
-  </div>
-  {% endif %}
   <div class="metric-card">
     <div class="value">{{ containers|selectattr('watchtower_enabled')|list|length }}</div>
     <div class="label">Surveilles</div>
@@ -79,8 +68,6 @@
       <button class="btn filter-btn active" data-filter="all">Tous</button>
       <button class="btn filter-btn" data-filter="running">Running</button>
       <button class="btn filter-btn" data-filter="stopped">Arrêtés</button>
-      <button class="btn filter-btn" data-filter="down">Inactifs</button>
-      <button class="btn filter-btn" data-filter="removed">Supprimés</button>
     </div>
   </div>
   <table>
@@ -107,12 +94,6 @@
               {% elif c.status in ('exited', 'dead') %}
                 <span class="badge exited">{{ c.status }}{% if c.exit_code is not none %} ({{ c.exit_code }}){% endif %}</span>
                 {% if c.finished_at %}<div style="font-size:.75rem;color:#8b949e;margin-top:2px">arrêté {{ c.finished_at }}</div>{% endif %}
-              {% elif c.status == 'removed' %}
-                <span class="badge removed">supprimé</span>
-                {% if c.last_status %}<div style="font-size:.75rem;color:#8b949e;margin-top:2px">dernier état : {{ c.last_status }}</div>{% endif %}
-              {% elif c.status == 'down' %}
-                <span class="badge down">inactif</span>
-                {% if c.compose_file %}<div style="font-size:.75rem;color:#8b949e;margin-top:2px" title="{{ c.compose_file }}">compose</div>{% endif %}
               {% else %}
                 <span class="badge paused">{{ c.status }}</span>
               {% endif %}
@@ -135,9 +116,7 @@
         {% else %}
           {% set ns.gid = ns.gid + 1 %}
           {% set running = group|selectattr('status','equalto','running')|list|length %}
-          {% set removed = group|selectattr('status','equalto','removed')|list|length %}
-          {% set down = group|selectattr('status','equalto','down')|list|length %}
-          {% set stopped = group|length - running - removed - down %}
+          {% set stopped = group|length - running %}
           <tr class="group-header" data-group="{{ ns.gid }}" data-statuses="{{ group|map(attribute='status')|join(',') }}">
             <td><strong>▶ {{ group|length }} conteneurs</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ image }}</td>
@@ -145,12 +124,6 @@
               <span class="badge running">{{ running }}/{{ group|length }}</span>
               {% if stopped > 0 %}
                 <span class="badge exited" style="margin-left:.25rem">{{ stopped }} arrêté{{ 's' if stopped > 1 }}</span>
-              {% endif %}
-              {% if removed > 0 %}
-                <span class="badge removed" style="margin-left:.25rem">{{ removed }} supprimé{{ 's' if removed > 1 }}</span>
-              {% endif %}
-              {% if down > 0 %}
-                <span class="badge down" style="margin-left:.25rem">{{ down }} inactif{{ 's' if down > 1 }}</span>
               {% endif %}
             </td>
             <td></td>
@@ -166,12 +139,6 @@
               {% elif c.status in ('exited', 'dead') %}
                 <span class="badge exited">{{ c.status }}{% if c.exit_code is not none %} ({{ c.exit_code }}){% endif %}</span>
                 {% if c.finished_at %}<div style="font-size:.75rem;color:#8b949e;margin-top:2px">arrêté {{ c.finished_at }}</div>{% endif %}
-              {% elif c.status == 'removed' %}
-                <span class="badge removed">supprimé</span>
-                {% if c.last_status %}<div style="font-size:.75rem;color:#8b949e;margin-top:2px">dernier état : {{ c.last_status }}</div>{% endif %}
-              {% elif c.status == 'down' %}
-                <span class="badge down">inactif</span>
-                {% if c.compose_file %}<div style="font-size:.75rem;color:#8b949e;margin-top:2px" title="{{ c.compose_file }}">compose</div>{% endif %}
               {% else %}
                 <span class="badge paused">{{ c.status }}</span>
               {% endif %}
@@ -223,9 +190,7 @@ document.querySelectorAll('.group-header').forEach(function(header) {
       rows.forEach(function(r) {
         if (filter === 'all') { r.style.display = ''; }
         else if (filter === 'running') { r.style.display = r.dataset.status === 'running' ? '' : 'none'; }
-        else if (filter === 'removed') { r.style.display = r.dataset.status === 'removed' ? '' : 'none'; }
-        else if (filter === 'down') { r.style.display = r.dataset.status === 'down' ? '' : 'none'; }
-        else { r.style.display = (r.dataset.status !== 'running' && r.dataset.status !== 'removed' && r.dataset.status !== 'down') ? '' : 'none'; } /* stopped = anything not running/removed/down */
+        else { r.style.display = r.dataset.status !== 'running' ? '' : 'none'; }
       });
     }
     label.textContent = label.textContent.replace(open ? '\u25bc' : '\u25b6', open ? '\u25b6' : '\u25bc');
@@ -241,9 +206,7 @@ document.querySelectorAll('.filter-btn').forEach(function(btn) {
     document.querySelectorAll('tbody tr[data-status]:not(.group-header):not(.group-child)').forEach(function(row) {
       if (filter === 'all') { row.style.display = ''; }
       else if (filter === 'running') { row.style.display = row.dataset.status === 'running' ? '' : 'none'; }
-      else if (filter === 'removed') { row.style.display = row.dataset.status === 'removed' ? '' : 'none'; }
-      else if (filter === 'down') { row.style.display = row.dataset.status === 'down' ? '' : 'none'; }
-      else { row.style.display = (row.dataset.status !== 'running' && row.dataset.status !== 'removed' && row.dataset.status !== 'down') ? '' : 'none'; }
+      else { row.style.display = row.dataset.status !== 'running' ? '' : 'none'; }
     });
     /* Group headers */
     document.querySelectorAll('.group-header').forEach(function(header) {
@@ -251,9 +214,7 @@ document.querySelectorAll('.filter-btn').forEach(function(btn) {
       var match = false;
       if (filter === 'all') { match = true; }
       else if (filter === 'running') { match = statuses.indexOf('running') !== -1; }
-      else if (filter === 'removed') { match = statuses.indexOf('removed') !== -1; }
-      else if (filter === 'down') { match = statuses.indexOf('down') !== -1; }
-      else { match = statuses.some(function(s) { return s !== 'running' && s !== 'removed' && s !== 'down'; }); }
+      else { match = statuses.some(function(s) { return s !== 'running'; }); }
       header.style.display = match ? '' : 'none';
       /* Also hide/show child rows according to filter */
       var gid = header.dataset.group;
@@ -261,10 +222,8 @@ document.querySelectorAll('.filter-btn').forEach(function(btn) {
       document.querySelectorAll('.group-child[data-group="' + gid + '"]').forEach(function(child) {
         if (!match) { child.style.display = 'none'; }
         else if (filter === 'running') { child.style.display = child.dataset.status === 'running' ? '' : 'none'; }
-        else if (filter === 'stopped') { child.style.display = (child.dataset.status !== 'running' && child.dataset.status !== 'removed' && child.dataset.status !== 'down') ? '' : 'none'; }
-        else if (filter === 'removed') { child.style.display = child.dataset.status === 'removed' ? '' : 'none'; }
-        else if (filter === 'down') { child.style.display = child.dataset.status === 'down' ? '' : 'none'; }
-        else { child.style.display = ''; } /* filter === 'all': show all children */
+        else if (filter === 'stopped') { child.style.display = child.dataset.status !== 'running' ? '' : 'none'; }
+        else { child.style.display = ''; }
       });
       /* Sync the expand/collapse arrow with actual child visibility */
       if (label) {
