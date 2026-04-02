@@ -6,7 +6,6 @@ import time
 import secrets
 import functools
 import subprocess
-import logging
 from collections import defaultdict
 from datetime import timedelta
 
@@ -68,8 +67,12 @@ app.jinja_env.globals["csrf_token"] = _generate_csrf_token
 
 @app.before_request
 def _csrf_protect():
-    """Reject POST requests with a missing or invalid CSRF token."""
-    if request.method == "POST":
+    """Reject POST requests with a missing or invalid CSRF token.
+
+    The /login route is exempt: the very first POST has no prior session,
+    so no CSRF token can exist yet.  Login is protected by rate-limiting instead.
+    """
+    if request.method == "POST" and request.endpoint != "login":
         token = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token")
         if not token or token != session.get("_csrf_token"):
             abort(403)
@@ -214,7 +217,7 @@ def _refresh_remember_cookie(response):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        client_ip = request.remote_addr or "unknown"
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
         if _is_rate_limited(client_ip):
             flash("Trop de tentatives. Reessayez dans une minute.", "error")
             return render_template("login.html")
