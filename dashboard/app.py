@@ -1,4 +1,5 @@
 import os
+import glob
 import json
 import re
 import time
@@ -6,6 +7,7 @@ import secrets
 import functools
 import subprocess
 
+import yaml
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import docker
 import requests as http_requests
@@ -29,6 +31,11 @@ WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://localhost:8080
 CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
 CONTAINER_HISTORY_FILE = os.path.join(CONFIG_DIR, "container_history.json")
+
+# Comma-separated host paths containing docker-compose files to scan for
+# down/uncreated services (e.g. OMV7 compose stacks).
+# Example: COMPOSE_DIRS=/compose,/opt/stacks
+COMPOSE_DIRS = os.environ.get("COMPOSE_DIRS", "")
 
 # How long (seconds) we keep removed containers visible on the dashboard.
 REMOVED_RETENTION_SECONDS = 7 * 24 * 3600  # 7 days
@@ -244,6 +251,92 @@ def _save_container_history(history):
 
 
 # ===========================================================================
+# Compose-file discovery (for down/uncreated services — OMV7 support)
+# ===========================================================================
+def _list_compose_services():
+    """Scan COMPOSE_DIRS for docker-compose YAML files.
+
+    Returns a list of dicts describing services found in those files,
+    regardless of whether a Docker container exists for them.  Used to
+    surface services that are "down" (never created or cleaned up) but
+    whose compose definition is still present on disk.
+    """
+    found = []
+    dirs = [d.strip() for d in COMPOSE_DIRS.split(",") if d.strip()]
+    if not dirs:
+        return found
+
+    patterns = [
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+    ]
+
+    for base_dir in dirs:
+        for pattern in patterns:
+            for filepath in glob.glob(
+                os.path.join(base_dir, "**", pattern), recursive=True
+            ):
+                try:
+                    with open(filepath, "r") as fh:
+                        data = yaml.safe_load(fh)
+                    if not isinstance(data, dict) or "services" not in data:
+                        continue
+
+                    # Derive project name from the directory that holds the file
+                    # (docker compose v2 convention: strip non-alphanumeric chars).
+                    raw_project = os.path.basename(os.path.dirname(filepath))
+                    project_name = re.sub(r"[^a-z0-9]", "", raw_project.lower())
+
+                    for svc_name, svc_cfg in (data.get("services") or {}).items():
+                        if not isinstance(svc_cfg, dict):
+                            svc_cfg = {}
+                        # Explicit container_name wins; otherwise use the
+                        # docker-compose v2 default: <project>-<service>-1
+                        container_name = svc_cfg.get("container_name")
+                        if not container_name:
+                            container_name = f"{project_name}-{svc_name}-1"
+
+                        image = svc_cfg.get("image") or "unknown"
+
+                        # Determine watchtower-enable from service labels.
+                        # Labels may be a list ["key=value", ...] or a dict.
+                        wt_enabled = True
+                        raw_labels = svc_cfg.get("labels") or {}
+                        if isinstance(raw_labels, list):
+                            label_dict = {}
+                            for item in raw_labels:
+                                if "=" in item:
+                                    k, _, v = item.partition("=")
+                                    label_dict[k.strip()] = v.strip()
+                            raw_labels = label_dict
+                        wt_label = raw_labels.get(
+                            "com.centurylinklabs.watchtower.enable"
+                        )
+                        if wt_label is not None:
+                            wt_enabled = str(wt_label).lower() != "false"
+                        found.append(
+                            {
+                                "name": container_name,
+                                "image": image,
+                                "status": "down",
+                                "id": "—",
+                                "watchtower_enabled": wt_enabled,
+                                "created": "",
+                                "exit_code": None,
+                                "finished_at": "",
+                                "compose_file": filepath,
+                            }
+                        )
+                except Exception as exc:
+                    app.logger.warning(
+                        "Could not parse compose file %s: %s", filepath, exc
+                    )
+    return found
+
+
+# ===========================================================================
 # Container helpers
 # ===========================================================================
 def _list_containers():
@@ -344,6 +437,15 @@ def _list_containers():
             })
 
     _save_container_history(history)
+
+    # ---- Merge services from docker-compose files (OMV7 / down stacks) ----
+    if COMPOSE_DIRS:
+        compose_services = _list_compose_services()
+        for svc in compose_services:
+            if svc["name"] not in live_names and svc["name"] not in {
+                c["name"] for c in containers
+            }:
+                containers.append(svc)
 
     containers.sort(key=lambda x: x["name"])
     return containers
