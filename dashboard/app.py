@@ -6,10 +6,12 @@ import time
 import secrets
 import functools
 import subprocess
+import logging
+from collections import defaultdict
 from datetime import timedelta
 
 import yaml
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
 import docker
 import requests as http_requests
 
@@ -17,7 +19,16 @@ import requests as http_requests
 # Flask application
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY") or "dev-secret-key"
+
+_provided_key = os.environ.get("SECRET_KEY", "").strip()
+if not _provided_key:
+    _provided_key = secrets.token_hex(32)
+    app.logger.warning(
+        "SECRET_KEY non definie ! Une cle aleatoire a ete generee. "
+        "Les sessions seront perdues au redemarrage. "
+        "Definissez SECRET_KEY dans votre fichier .env."
+    )
+app.secret_key = _provided_key
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 
 REMEMBER_DAYS = 30
@@ -41,6 +52,48 @@ COMPOSE_DIRS = os.environ.get("COMPOSE_DIRS", "")
 
 # How long (seconds) we keep removed containers visible on the dashboard.
 REMOVED_RETENTION_SECONDS = 7 * 24 * 3600  # 7 days
+
+# ---------------------------------------------------------------------------
+# CSRF protection (lightweight, no extra dependency)
+# ---------------------------------------------------------------------------
+def _generate_csrf_token():
+    """Return the CSRF token for the current session, creating one if needed."""
+    if "_csrf_token" not in session:
+        session["_csrf_token"] = secrets.token_hex(32)
+    return session["_csrf_token"]
+
+
+app.jinja_env.globals["csrf_token"] = _generate_csrf_token
+
+
+@app.before_request
+def _csrf_protect():
+    """Reject POST requests with a missing or invalid CSRF token."""
+    if request.method == "POST":
+        token = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token")
+        if not token or token != session.get("_csrf_token"):
+            abort(403)
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting on /login (in-memory, per IP)
+# ---------------------------------------------------------------------------
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 60
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+
+
+def _is_rate_limited(ip: str) -> bool:
+    """Return True if *ip* has exceeded the login attempt limit."""
+    now = time.time()
+    cutoff = now - _LOGIN_WINDOW_SECONDS
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if t > cutoff]
+    return len(_login_attempts[ip]) >= _LOGIN_MAX_ATTEMPTS
+
+
+def _record_login_attempt(ip: str) -> None:
+    _login_attempts[ip].append(time.time())
+
 
 # ---------------------------------------------------------------------------
 # Docker client (socket mounted from host)
@@ -161,10 +214,17 @@ def _refresh_remember_cookie(response):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        client_ip = request.remote_addr or "unknown"
+        if _is_rate_limited(client_ip):
+            flash("Trop de tentatives. Reessayez dans une minute.", "error")
+            return render_template("login.html")
+        _record_login_attempt(client_ip)
         if (request.form.get("username") == DASHBOARD_USERNAME
                 and request.form.get("password") == DASHBOARD_PASSWORD):
             session["logged_in"] = True
             session.permanent = True
+            # Reset attempts on successful login
+            _login_attempts.pop(client_ip, None)
             resp = redirect(url_for("dashboard"))
             if request.form.get("remember_me"):
                 token = _create_remember_token()
@@ -210,9 +270,9 @@ def trigger_update():
             timeout=120,
         )
         if resp.status_code == 200:
-            flash("Mise a jour declenchee avec succes.", "success")
+            flash("Mise à jour déclenchée avec succès.", "success")
         else:
-            flash(f"Watchtower a repondu avec le code {resp.status_code}.", "error")
+            flash(f"Watchtower a répondu avec le code {resp.status_code}.", "error")
     except Exception as exc:
         flash(f"Impossible de contacter Watchtower : {exc}", "error")
     return redirect(url_for("dashboard"))
@@ -225,7 +285,7 @@ def settings():
         _save_settings(request.form)
         ok = _restart_watchtower()
         if ok:
-            flash("Parametres sauvegardes. Watchtower redemarre.", "success")
+            flash("Paramètres sauvegardés. Watchtower redémarré.", "success")
         return redirect(url_for("settings"))
     current = _load_settings()
     return render_template("settings.html", settings=current)
@@ -258,17 +318,28 @@ def _save_container_history(history):
 # ===========================================================================
 # Compose-file discovery (for down/uncreated services — OMV7 support)
 # ===========================================================================
+_compose_cache: dict = {"result": [], "ts": 0.0}
+_COMPOSE_CACHE_TTL = 60  # seconds
+
+
 def _list_compose_services():
     """Scan COMPOSE_DIRS for docker-compose YAML files.
+
+    Results are cached for 60 s to avoid repeated filesystem scans.
 
     Returns a list of dicts describing services found in those files,
     regardless of whether a Docker container exists for them.  Used to
     surface services that are "down" (never created or cleaned up) but
     whose compose definition is still present on disk.
     """
+    now = time.time()
+    if now - _compose_cache["ts"] < _COMPOSE_CACHE_TTL:
+        return _compose_cache["result"]
+
     found = []
     dirs = [d.strip() for d in COMPOSE_DIRS.split(",") if d.strip()]
     if not dirs:
+        _compose_cache.update(result=found, ts=now)
         return found
 
     seen_files = set()
@@ -277,67 +348,69 @@ def _list_compose_services():
         # Scan ALL .yml/.yaml files — OMV7 and other tools may use
         # non-standard filenames.  We validate content (services: key)
         # so false-positives are harmless.
-        for filepath in glob.glob(
-            os.path.join(base_dir, "**", "*.y*ml"), recursive=True
-        ):
-            if filepath in seen_files:
-                continue
-            seen_files.add(filepath)
-            try:
-                with open(filepath, "r") as fh:
-                    data = yaml.safe_load(fh)
-                if not isinstance(data, dict) or "services" not in data:
+        for ext in ("*.yml", "*.yaml"):
+            for filepath in glob.glob(
+                os.path.join(base_dir, "**", ext), recursive=True
+            ):
+                if filepath in seen_files:
                     continue
+                seen_files.add(filepath)
+                try:
+                    with open(filepath, "r") as fh:
+                        data = yaml.safe_load(fh)
+                    if not isinstance(data, dict) or "services" not in data:
+                        continue
 
-                # Derive project name from the directory that holds the file
-                # (docker compose v2 convention: strip non-alphanumeric chars).
-                raw_project = os.path.basename(os.path.dirname(filepath))
-                project_name = re.sub(r"[^a-z0-9]", "", raw_project.lower())
+                    # Derive project name from the directory that holds the file
+                    # (docker compose v2 convention: strip non-alphanumeric chars).
+                    raw_project = os.path.basename(os.path.dirname(filepath))
+                    project_name = re.sub(r"[^a-z0-9]", "", raw_project.lower())
 
-                for svc_name, svc_cfg in (data.get("services") or {}).items():
-                    if not isinstance(svc_cfg, dict):
-                        svc_cfg = {}
-                    # Explicit container_name wins; otherwise use the
-                    # docker-compose v2 default: <project>-<service>-1
-                    container_name = svc_cfg.get("container_name")
-                    if not container_name:
-                        container_name = f"{project_name}-{svc_name}-1"
+                    for svc_name, svc_cfg in (data.get("services") or {}).items():
+                        if not isinstance(svc_cfg, dict):
+                            svc_cfg = {}
+                        # Explicit container_name wins; otherwise use the
+                        # docker-compose v2 default: <project>-<service>-1
+                        container_name = svc_cfg.get("container_name")
+                        if not container_name:
+                            container_name = f"{project_name}-{svc_name}-1"
 
-                    image = svc_cfg.get("image") or "unknown"
+                        image = svc_cfg.get("image") or "unknown"
 
-                    # Determine watchtower-enable from service labels.
-                    # Labels may be a list ["key=value", ...] or a dict.
-                    wt_enabled = True
-                    raw_labels = svc_cfg.get("labels") or {}
-                    if isinstance(raw_labels, list):
-                        label_dict = {}
-                        for item in raw_labels:
-                            if "=" in item:
-                                k, _, v = item.partition("=")
-                                label_dict[k.strip()] = v.strip()
-                        raw_labels = label_dict
-                    wt_label = raw_labels.get(
-                        "com.centurylinklabs.watchtower.enable"
+                        # Determine watchtower-enable from service labels.
+                        # Labels may be a list ["key=value", ...] or a dict.
+                        wt_enabled = True
+                        raw_labels = svc_cfg.get("labels") or {}
+                        if isinstance(raw_labels, list):
+                            label_dict = {}
+                            for item in raw_labels:
+                                if "=" in item:
+                                    k, _, v = item.partition("=")
+                                    label_dict[k.strip()] = v.strip()
+                            raw_labels = label_dict
+                        wt_label = raw_labels.get(
+                            "com.centurylinklabs.watchtower.enable"
+                        )
+                        if wt_label is not None:
+                            wt_enabled = str(wt_label).lower() != "false"
+                        found.append(
+                            {
+                                "name": container_name,
+                                "image": image,
+                                "status": "down",
+                                "id": "—",
+                                "watchtower_enabled": wt_enabled,
+                                "created": "",
+                                "exit_code": None,
+                                "finished_at": "",
+                                "compose_file": filepath,
+                            }
+                        )
+                except Exception as exc:
+                    app.logger.warning(
+                        "Could not parse compose file %s: %s", filepath, exc
                     )
-                    if wt_label is not None:
-                        wt_enabled = str(wt_label).lower() != "false"
-                    found.append(
-                        {
-                            "name": container_name,
-                            "image": image,
-                            "status": "down",
-                            "id": "—",
-                            "watchtower_enabled": wt_enabled,
-                            "created": "",
-                            "exit_code": None,
-                            "finished_at": "",
-                            "compose_file": filepath,
-                        }
-                    )
-            except Exception as exc:
-                app.logger.warning(
-                    "Could not parse compose file %s: %s", filepath, exc
-                )
+    _compose_cache.update(result=found, ts=time.time())
     return found
 
 
@@ -455,12 +528,12 @@ def _list_containers():
 
     # ---- Merge services from docker-compose files (OMV7 / down stacks) ----
     if COMPOSE_DIRS:
+        all_names = live_names | {c["name"] for c in containers}
         compose_services = _list_compose_services()
         for svc in compose_services:
-            if svc["name"] not in live_names and svc["name"] not in {
-                c["name"] for c in containers
-            }:
+            if svc["name"] not in all_names:
                 containers.append(svc)
+                all_names.add(svc["name"])
 
     containers.sort(key=lambda x: x["name"])
     return containers
@@ -613,18 +686,18 @@ def _restart_watchtower():
             if "RUNNING" in check.stdout:
                 return True
             else:
-                flash(f"Watchtower redemarre mais statut inattendu : {check.stdout.strip()}", "error")
+                flash(f"Watchtower redémarré mais statut inattendu : {check.stdout.strip()}", "error")
                 return False
         else:
             flash(f"Erreur supervisorctl : {result.stderr}", "error")
             return False
     except Exception as exc:
-        flash(f"Erreur lors du redemarrage de Watchtower : {exc}", "error")
+        flash(f"Erreur lors du redémarrage de Watchtower : {exc}", "error")
         return False
 
 
 # ===========================================================================
-# Entry point
+# Entry point (development only — production uses gunicorn via supervisord)
 # ===========================================================================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)

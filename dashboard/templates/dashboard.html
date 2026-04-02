@@ -62,6 +62,7 @@
   <div style="display:flex;align-items:center;justify-content:space-between">
     <h2>Mise a jour manuelle</h2>
     <form method="POST" action="{{ url_for('trigger_update') }}" id="updateForm">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary" id="updateBtn">
         <span id="updateText">Verifier maintenant</span>
         <span id="updateSpinner" class="spinner" style="display:none"></span>

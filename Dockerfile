@@ -1,12 +1,12 @@
 # =============================================================
-# Stage 1 - Build Watchtower from source
+# Stage 1 - Build Watchtower from source (pinned to v1.7.1)
 # =============================================================
 FROM golang:1.22-alpine AS builder
 
 RUN apk add --no-cache git
 
 WORKDIR /src
-RUN git clone https://github.com/containrrr/watchtower.git .
+RUN git clone --branch v1.7.1 --depth 1 https://github.com/containrrr/watchtower.git .
 RUN VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev") && \
     CGO_ENABLED=0 go build -ldflags "-X github.com/containrrr/watchtower/internal/meta.Version=$VERSION" -o /watchtower .
 
@@ -40,8 +40,8 @@ RUN ls -la /app/ && ls -la /app/templates/
 
 # Supervisor and entrypoint configs
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY start_watchtower.sh /usr/local/bin/start_watchtower.sh
-RUN chmod +x /usr/local/bin/start_watchtower.sh
+COPY start_watchtower.py /usr/local/bin/start_watchtower.py
+RUN chmod +x /usr/local/bin/start_watchtower.py
 
 LABEL org.opencontainers.image.source="https://github.com/turiko313/DOCKER-watchtower"
 LABEL org.opencontainers.image.description="Watchtower + Dashboard"

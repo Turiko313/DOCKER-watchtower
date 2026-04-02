@@ -17,12 +17,14 @@ Deploiement personnalise de **[Watchtower](https://containrrr.dev/watchtower/)**
 ```
 DOCKER-watchtower/
 ├── docker-compose.yml          # Orchestration Watchtower + Dashboard
+├── Dockerfile                  # Image Docker (multi-stage : Go + Python)
+├── supervisord.conf            # Gestion des processus watchtower + dashboard
+├── start_watchtower.py         # Script de demarrage Watchtower (lecture JSON → env vars)
 ├── .env.example                # Modele des variables d'environnement
 ├── .gitignore
 ├── dashboard/
-│   ├── Dockerfile              # Image Docker du tableau de bord
+│   ├── app.py                  # Application Flask (dashboard web)
 │   ├── requirements.txt        # Dependances Python
-│   ├── app.py                  # Application Flask
 │   └── templates/
 │       ├── base.html
 │       ├── login.html
