@@ -206,10 +206,10 @@ document.querySelectorAll('.filter-btn').forEach(function(btn) {
       /* Also hide/show child rows according to filter */
       var gid = header.dataset.group;
       document.querySelectorAll('.group-child[data-group="' + gid + '"]').forEach(function(child) {
-        if (!match) { child.style.display = 'none'; return; }
-        if (filter === 'all') { /* keep current expand state */ }
+        if (!match) { child.style.display = 'none'; }
         else if (filter === 'running') { child.style.display = child.dataset.status === 'running' ? '' : 'none'; }
-        else { child.style.display = child.dataset.status !== 'running' ? '' : 'none'; }
+        else if (filter === 'stopped') { child.style.display = child.dataset.status !== 'running' ? '' : 'none'; }
+        /* filter === 'all': keep current expand/collapse state untouched */
       });
     });
   });

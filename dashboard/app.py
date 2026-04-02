@@ -253,8 +253,8 @@ def _list_containers():
                         "watchtower_enabled": False,
                         "created": c.attrs.get("Created", "")[:19].replace("T", " "),
                     })
-                except Exception:
-                    pass
+                except Exception as inner_exc:
+                    app.logger.warning("Skipping container: %s", inner_exc)
     except Exception as exc:
         flash(f"Erreur Docker : {exc}", "error")
     containers.sort(key=lambda x: x["name"])
