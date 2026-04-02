@@ -28,6 +28,10 @@ WATCHTOWER_API_TOKEN = os.environ.get("WATCHTOWER_HTTP_API_TOKEN", "")
 WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://localhost:8080")
 CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
+CONTAINER_HISTORY_FILE = os.path.join(CONFIG_DIR, "container_history.json")
+
+# How long (seconds) we keep removed containers visible on the dashboard.
+REMOVED_RETENTION_SECONDS = 7 * 24 * 3600  # 7 days
 
 # ---------------------------------------------------------------------------
 # Docker client (socket mounted from host)
@@ -216,10 +220,35 @@ def settings():
 
 
 # ===========================================================================
+# Container history helpers (track removed/down containers)
+# ===========================================================================
+def _load_container_history():
+    """Load previously seen containers from the history file."""
+    try:
+        with open(CONTAINER_HISTORY_FILE, "r") as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_container_history(history):
+    """Persist container history, pruning entries older than retention period."""
+    now = time.time()
+    pruned = {
+        k: v for k, v in history.items()
+        if v.get("present") or (now - v.get("removed_at", now)) < REMOVED_RETENTION_SECONDS
+    }
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONTAINER_HISTORY_FILE, "w") as fh:
+        json.dump(pruned, fh, indent=2)
+
+
+# ===========================================================================
 # Container helpers
 # ===========================================================================
 def _list_containers():
     containers = []
+    live_names = set()
     try:
         client = _get_docker_client()
         for c in client.containers.list(all=True):
@@ -233,30 +262,89 @@ def _list_containers():
                     wt_enabled = True
                 else:
                     wt_enabled = wt_label.lower() != "false"
-                containers.append({
+
+                state = c.attrs.get("State", {})
+                exit_code = state.get("ExitCode")
+                finished_at = state.get("FinishedAt", "")
+                # Docker returns "0001-01-01T00:00:00Z" when never finished
+                if finished_at and not finished_at.startswith("0001"):
+                    finished_at = finished_at[:19].replace("T", " ")
+                else:
+                    finished_at = ""
+
+                info = {
                     "name": c.name,
                     "image": image_name,
                     "status": c.status,
                     "id": c.short_id,
                     "watchtower_enabled": wt_enabled,
                     "created": c.attrs.get("Created", "")[:19].replace("T", " "),
-                })
+                    "exit_code": exit_code if c.status in ("exited", "dead") else None,
+                    "finished_at": finished_at if c.status in ("exited", "dead") else "",
+                }
+                containers.append(info)
+                live_names.add(c.name)
             except Exception:
                 # Single container failed — add it with minimal info instead
                 # of aborting the entire loop.
                 try:
+                    name = c.name or c.short_id or "unknown"
                     containers.append({
-                        "name": c.name or c.short_id or "unknown",
+                        "name": name,
                         "image": c.attrs.get("Config", {}).get("Image", "unknown"),
                         "status": c.attrs.get("State", {}).get("Status", "unknown"),
                         "id": c.short_id or "?",
                         "watchtower_enabled": False,
                         "created": c.attrs.get("Created", "")[:19].replace("T", " "),
+                        "exit_code": None,
+                        "finished_at": "",
                     })
+                    live_names.add(name)
                 except Exception as inner_exc:
                     app.logger.warning("Skipping container: %s", inner_exc)
     except Exception as exc:
         flash(f"Erreur Docker : {exc}", "error")
+
+    # ---- Merge with container history to show removed/down containers ----
+    history = _load_container_history()
+    now = time.time()
+
+    # Update history with currently live containers
+    for c in containers:
+        history[c["name"]] = {
+            "name": c["name"],
+            "image": c["image"],
+            "id": c["id"],
+            "watchtower_enabled": c["watchtower_enabled"],
+            "created": c["created"],
+            "last_status": c["status"],
+            "last_seen": now,
+            "present": True,
+            "removed_at": None,
+        }
+
+    # Add removed containers (previously seen, now absent)
+    for name, entry in history.items():
+        if name not in live_names:
+            entry["present"] = False
+            if entry.get("removed_at") is None:
+                entry["removed_at"] = now
+
+            containers.append({
+                "name": entry["name"],
+                "image": entry.get("image", "unknown"),
+                "status": "removed",
+                "id": entry.get("id", "?"),
+                "watchtower_enabled": entry.get("watchtower_enabled", False),
+                "created": entry.get("created", ""),
+                "exit_code": None,
+                "finished_at": "",
+                "last_status": entry.get("last_status", "unknown"),
+                "removed_since": entry.get("removed_at", now),
+            })
+
+    _save_container_history(history)
+
     containers.sort(key=lambda x: x["name"])
     return containers
 
