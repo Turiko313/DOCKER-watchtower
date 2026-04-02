@@ -51,7 +51,6 @@
   <div style="display:flex;align-items:center;justify-content:space-between">
     <h2>Mise a jour manuelle</h2>
     <form method="POST" action="{{ url_for('trigger_update') }}" id="updateForm">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary" id="updateBtn">
         <span id="updateText">Verifier maintenant</span>
         <span id="updateSpinner" class="spinner" style="display:none"></span>
@@ -177,23 +176,26 @@ document.getElementById('updateForm').addEventListener('submit', function(e) {
   document.getElementById('updateBtn').style.opacity = '0.7';
 });
 document.querySelectorAll('.group-header').forEach(function(header) {
+  header.dataset.open = '0';
   header.addEventListener('click', function() {
     var gid = this.dataset.group;
     var rows = document.querySelectorAll('.group-child[data-group="' + gid + '"]');
     var label = this.querySelector('td strong');
-    var open = rows.length > 0 && Array.from(rows).some(function(r) { return r.style.display !== 'none'; });
+    var isOpen = this.dataset.open === '1';
     var activeBtn = document.querySelector('.filter-btn.active');
     var filter = activeBtn ? activeBtn.dataset.filter : 'all';
-    if (open) {
+    if (isOpen) {
+      this.dataset.open = '0';
       rows.forEach(function(r) { r.style.display = 'none'; });
     } else {
+      this.dataset.open = '1';
       rows.forEach(function(r) {
         if (filter === 'all') { r.style.display = ''; }
         else if (filter === 'running') { r.style.display = r.dataset.status === 'running' ? '' : 'none'; }
         else { r.style.display = r.dataset.status !== 'running' ? '' : 'none'; }
       });
     }
-    label.textContent = label.textContent.replace(open ? '\u25bc' : '\u25b6', open ? '\u25b6' : '\u25bc');
+    label.textContent = label.textContent.replace(isOpen ? '\u25bc' : '\u25b6', isOpen ? '\u25b6' : '\u25bc');
   });
 });
 /* Status filter buttons */
@@ -216,19 +218,23 @@ document.querySelectorAll('.filter-btn').forEach(function(btn) {
       else if (filter === 'running') { match = statuses.indexOf('running') !== -1; }
       else { match = statuses.some(function(s) { return s !== 'running'; }); }
       header.style.display = match ? '' : 'none';
-      /* Also hide/show child rows according to filter */
+      /* Only update children of open groups */
       var gid = header.dataset.group;
-      var label = header.querySelector('td strong');
+      var isOpen = header.dataset.open === '1';
       document.querySelectorAll('.group-child[data-group="' + gid + '"]').forEach(function(child) {
-        if (!match) { child.style.display = 'none'; }
+        if (!match || !isOpen) { child.style.display = 'none'; }
         else if (filter === 'running') { child.style.display = child.dataset.status === 'running' ? '' : 'none'; }
         else if (filter === 'stopped') { child.style.display = child.dataset.status !== 'running' ? '' : 'none'; }
         else { child.style.display = ''; }
       });
-      /* Sync the expand/collapse arrow with actual child visibility */
-      if (label) {
-        var anyVisible = Array.from(document.querySelectorAll('.group-child[data-group="' + gid + '"]')).some(function(r) { return r.style.display !== 'none'; });
-        label.textContent = label.textContent.replace(/[\u25b6\u25bc]/, anyVisible ? '\u25bc' : '\u25b6');
+      /* Sync arrow only for open groups */
+      if (isOpen) {
+        var label = header.querySelector('td strong');
+        if (label) {
+          var anyVisible = Array.from(document.querySelectorAll('.group-child[data-group="' + gid + '"]')).some(function(r) { return r.style.display !== 'none'; });
+          label.textContent = label.textContent.replace(/[\u25b6\u25bc]/, anyVisible ? '\u25bc' : '\u25b6');
+          if (!anyVisible) { header.dataset.open = '0'; }
+        }
       }
     });
   });

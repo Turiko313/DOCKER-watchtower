@@ -6,9 +6,9 @@ import secrets
 import functools
 import subprocess
 from collections import defaultdict
-from datetime import timedelta
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from flask import Flask, render_template, request, redirect, url_for, flash
 import docker
 import requests as http_requests
 
@@ -26,10 +26,6 @@ if not _provided_key:
         "Definissez SECRET_KEY dans votre fichier .env."
     )
 app.secret_key = _provided_key
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
-
-REMEMBER_DAYS = 30
-REMEMBER_SECONDS = REMEMBER_DAYS * 24 * 3600
 
 # ---------------------------------------------------------------------------
 # Configuration from environment
@@ -42,29 +38,47 @@ CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
 
 # ---------------------------------------------------------------------------
-# CSRF protection (lightweight, no extra dependency)
+# Signed-cookie authentication (session-independent, like FileBrowser)
 # ---------------------------------------------------------------------------
-def _generate_csrf_token():
-    """Return the CSRF token for the current session, creating one if needed."""
-    if "_csrf_token" not in session:
-        session["_csrf_token"] = secrets.token_hex(32)
-    return session["_csrf_token"]
+AUTH_COOKIE = "auth_token"
+AUTH_MAX_AGE = 30 * 24 * 3600  # 30 days
+
+_auth_serializer = URLSafeTimedSerializer(app.secret_key)
 
 
-app.jinja_env.globals["csrf_token"] = _generate_csrf_token
+def _create_auth_token(username):
+    """Create a signed auth token for the given username."""
+    return _auth_serializer.dumps({"u": username})
 
 
-@app.before_request
-def _csrf_protect():
-    """Reject POST requests with a missing or invalid CSRF token.
+def _verify_auth_token(token):
+    """Verify a signed auth token.  Returns True if valid and not expired."""
+    try:
+        data = _auth_serializer.loads(token, max_age=AUTH_MAX_AGE)
+        return data.get("u") == DASHBOARD_USERNAME
+    except (BadSignature, SignatureExpired):
+        return False
 
-    The /login route is exempt: the very first POST has no prior session,
-    so no CSRF token can exist yet.  Login is protected by rate-limiting instead.
-    """
-    if request.method == "POST" and request.endpoint != "login":
-        token = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token")
-        if not token or token != session.get("_csrf_token"):
-            abort(403)
+
+def _is_logged_in():
+    """Check if the current request has a valid auth cookie."""
+    token = request.cookies.get(AUTH_COOKIE)
+    return bool(token) and _verify_auth_token(token)
+
+
+@app.context_processor
+def _inject_auth():
+    """Make 'logged_in' available in all templates."""
+    return {"logged_in": _is_logged_in()}
+
+
+def login_required(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if not _is_logged_in():
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -104,107 +118,12 @@ def _get_docker_client():
 
 
 # ===========================================================================
-# Remember-me token helpers (server-side, persisted on /config volume)
-# ===========================================================================
-REMEMBER_FILE = os.path.join(CONFIG_DIR, "remember_tokens.json")
-
-
-def _load_remember_tokens():
-    try:
-        with open(REMEMBER_FILE, "r") as fh:
-            tokens = json.load(fh)
-        now = time.time()
-        tokens = {k: v for k, v in tokens.items() if v > now}
-        return tokens
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def _save_remember_tokens(tokens):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(REMEMBER_FILE, "w") as fh:
-        json.dump(tokens, fh)
-
-
-def _create_remember_token():
-    token = secrets.token_hex(32)
-    tokens = _load_remember_tokens()
-    tokens[token] = time.time() + REMEMBER_SECONDS
-    _save_remember_tokens(tokens)
-    return token
-
-
-def _validate_remember_token(token):
-    if not token:
-        return False
-    tokens = _load_remember_tokens()
-    return token in tokens and tokens[token] > time.time()
-
-
-def _delete_remember_token(token):
-    if not token:
-        return
-    tokens = _load_remember_tokens()
-    tokens.pop(token, None)
-    _save_remember_tokens(tokens)
-
-
-# ===========================================================================
-# Auth helpers
-# ===========================================================================
-def login_required(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        if session.get("logged_in"):
-            return f(*args, **kwargs)
-        # Fallback: try remember-me token (covers lost session cookie)
-        token = request.cookies.get("remember_token")
-        if _validate_remember_token(token):
-            session["logged_in"] = True
-            session.permanent = True
-            return f(*args, **kwargs)
-        return redirect(url_for("login"))
-    return wrapper
-
-
-@app.before_request
-def _auto_login_from_remember_token():
-    """Auto-login from remember-me cookie before any route runs."""
-    if session.get("logged_in"):
-        return
-    if not request.endpoint or request.endpoint in ("login", "static"):
-        return
-    token = request.cookies.get("remember_token")
-    if _validate_remember_token(token):
-        session["logged_in"] = True
-        session.permanent = True
-
-
-@app.after_request
-def _refresh_remember_cookie(response):
-    """Renew the remember-me cookie when less than 7 days remain (rolling window)."""
-    token = request.cookies.get("remember_token")
-    if token and session.get("logged_in"):
-        tokens = _load_remember_tokens()
-        expiry = tokens.get(token, 0)
-        remaining = expiry - time.time()
-        if 0 < remaining < 7 * 86400:
-            tokens[token] = time.time() + REMEMBER_SECONDS
-            _save_remember_tokens(tokens)
-            response.set_cookie(
-                "remember_token", token,
-                max_age=REMEMBER_SECONDS,
-                httponly=True,
-                samesite="Lax",
-            )
-    return response
-
-
-# ===========================================================================
 # Routes
 # ===========================================================================
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if _is_logged_in():
+        return redirect(url_for("dashboard"))
     if request.method == "POST":
         client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
         if _is_rate_limited(client_ip):
@@ -213,19 +132,15 @@ def login():
         _record_login_attempt(client_ip)
         if (request.form.get("username") == DASHBOARD_USERNAME
                 and request.form.get("password") == DASHBOARD_PASSWORD):
-            session["logged_in"] = True
-            session.permanent = True
-            # Reset attempts on successful login
             _login_attempts.pop(client_ip, None)
             resp = redirect(url_for("dashboard"))
-            if request.form.get("remember_me"):
-                token = _create_remember_token()
-                resp.set_cookie(
-                    "remember_token", token,
-                    max_age=REMEMBER_SECONDS,
-                    httponly=True,
-                    samesite="Lax",
-                )
+            resp.set_cookie(
+                AUTH_COOKIE,
+                _create_auth_token(DASHBOARD_USERNAME),
+                max_age=AUTH_MAX_AGE,
+                httponly=True,
+                samesite="Lax",
+            )
             return resp
         flash("Identifiants incorrects.", "error")
     return render_template("login.html")
@@ -233,10 +148,8 @@ def login():
 
 @app.route("/logout")
 def logout():
-    _delete_remember_token(request.cookies.get("remember_token"))
-    session.clear()
     resp = redirect(url_for("login"))
-    resp.delete_cookie("remember_token")
+    resp.delete_cookie(AUTH_COOKIE)
     return resp
 
 
