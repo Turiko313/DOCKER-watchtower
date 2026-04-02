@@ -35,6 +35,16 @@ SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
 docker_client = docker.from_env(version="auto")
 
 
+def _get_docker_client():
+    """Return a working Docker client, reconnecting if stale."""
+    global docker_client
+    try:
+        docker_client.ping()
+    except Exception:
+        docker_client = docker.from_env(version="auto")
+    return docker_client
+
+
 # ===========================================================================
 # Remember-me token helpers (server-side, persisted on /config volume)
 # ===========================================================================
@@ -211,24 +221,40 @@ def settings():
 def _list_containers():
     containers = []
     try:
-        for c in docker_client.containers.list(all=True):
+        client = _get_docker_client()
+        for c in client.containers.list(all=True):
             try:
-                image_name = c.image.tags[0] if c.image.tags else c.image.short_id
+                try:
+                    image_name = c.image.tags[0] if c.image.tags else c.image.short_id
+                except Exception:
+                    image_name = c.attrs.get("Config", {}).get("Image", "unknown")
+                wt_label = c.labels.get("com.centurylinklabs.watchtower.enable")
+                if wt_label is None:
+                    wt_enabled = True
+                else:
+                    wt_enabled = wt_label.lower() != "false"
+                containers.append({
+                    "name": c.name,
+                    "image": image_name,
+                    "status": c.status,
+                    "id": c.short_id,
+                    "watchtower_enabled": wt_enabled,
+                    "created": c.attrs.get("Created", "")[:19].replace("T", " "),
+                })
             except Exception:
-                image_name = c.attrs.get("Config", {}).get("Image", "unknown")
-            wt_label = c.labels.get("com.centurylinklabs.watchtower.enable")
-            if wt_label is None:
-                wt_enabled = True
-            else:
-                wt_enabled = wt_label.lower() != "false"
-            containers.append({
-                "name": c.name,
-                "image": image_name,
-                "status": c.status,
-                "id": c.short_id,
-                "watchtower_enabled": wt_enabled,
-                "created": c.attrs.get("Created", "")[:19].replace("T", " "),
-            })
+                # Single container failed — add it with minimal info instead
+                # of aborting the entire loop.
+                try:
+                    containers.append({
+                        "name": c.name or c.short_id or "unknown",
+                        "image": c.attrs.get("Config", {}).get("Image", "unknown"),
+                        "status": c.attrs.get("State", {}).get("Status", "unknown"),
+                        "id": c.short_id or "?",
+                        "watchtower_enabled": False,
+                        "created": c.attrs.get("Created", "")[:19].replace("T", " "),
+                    })
+                except Exception as inner_exc:
+                    app.logger.warning("Skipping container: %s", inner_exc)
     except Exception as exc:
         flash(f"Erreur Docker : {exc}", "error")
     containers.sort(key=lambda x: x["name"])
@@ -242,7 +268,8 @@ def _get_update_statuses():
     """Parse watchtower logs (last 24 h) for updated / failed containers."""
     statuses = {}
     try:
-        wt = docker_client.containers.get("watchtower-dashboard")
+        client = _get_docker_client()
+        wt = client.containers.get("watchtower-dashboard")
         logs = wt.logs(since=int(time.time()) - 86400, stdout=True, stderr=True)
         for line in logs.decode("utf-8", errors="replace").splitlines():
             line = line.strip()

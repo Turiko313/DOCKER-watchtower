@@ -61,7 +61,14 @@
 
 <!-- Containers table -->
 <div class="card">
-  <h2>Conteneurs</h2>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+    <h2 style="margin-bottom:0">Conteneurs</h2>
+    <div style="display:flex;gap:.5rem">
+      <button class="btn filter-btn active" data-filter="all">Tous</button>
+      <button class="btn filter-btn" data-filter="running">Running</button>
+      <button class="btn filter-btn" data-filter="stopped">Arrêtés</button>
+    </div>
+  </div>
   <table>
     <thead>
       <tr>
@@ -77,7 +84,7 @@
       {% for image, group in grouped.items() %}
         {% if group|length == 1 %}
           {% set c = group[0] %}
-          <tr>
+          <tr data-status="{{ c.status }}">
             <td><strong>{{ c.name }}</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
             <td>
@@ -107,15 +114,21 @@
         {% else %}
           {% set ns.gid = ns.gid + 1 %}
           {% set running = group|selectattr('status','equalto','running')|list|length %}
-          <tr class="group-header" data-group="{{ ns.gid }}">
+          {% set stopped = group|length - running %}
+          <tr class="group-header" data-group="{{ ns.gid }}" data-statuses="{{ group|map(attribute='status')|join(',') }}">
             <td><strong>▶ {{ group|length }} conteneurs</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ image }}</td>
-            <td><span class="badge running">{{ running }}/{{ group|length }}</span></td>
+            <td>
+              <span class="badge running">{{ running }}/{{ group|length }}</span>
+              {% if stopped > 0 %}
+                <span class="badge exited" style="margin-left:.25rem">{{ stopped }} arrêté{{ 's' if stopped > 1 }}</span>
+              {% endif %}
+            </td>
             <td></td>
             <td></td>
           </tr>
           {% for c in group %}
-          <tr class="group-child" data-group="{{ ns.gid }}" style="display:none">
+          <tr class="group-child" data-group="{{ ns.gid }}" data-status="{{ c.status }}" style="display:none">
             <td style="padding-left:2rem">↳ <strong>{{ c.name }}</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
             <td>
@@ -168,6 +181,37 @@ document.querySelectorAll('.group-header').forEach(function(header) {
     var open = rows[0] && rows[0].style.display !== 'none';
     rows.forEach(function(r) { r.style.display = open ? 'none' : ''; });
     label.textContent = label.textContent.replace(open ? '\u25bc' : '\u25b6', open ? '\u25b6' : '\u25bc');
+  });
+});
+/* Status filter buttons */
+document.querySelectorAll('.filter-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+    this.classList.add('active');
+    var filter = this.dataset.filter;
+    /* Single-container rows */
+    document.querySelectorAll('tbody tr[data-status]:not(.group-header):not(.group-child)').forEach(function(row) {
+      if (filter === 'all') { row.style.display = ''; }
+      else if (filter === 'running') { row.style.display = row.dataset.status === 'running' ? '' : 'none'; }
+      else { row.style.display = row.dataset.status !== 'running' ? '' : 'none'; }
+    });
+    /* Group headers */
+    document.querySelectorAll('.group-header').forEach(function(header) {
+      var statuses = (header.dataset.statuses || '').split(',');
+      var match = false;
+      if (filter === 'all') { match = true; }
+      else if (filter === 'running') { match = statuses.indexOf('running') !== -1; }
+      else { match = statuses.some(function(s) { return s !== 'running'; }); }
+      header.style.display = match ? '' : 'none';
+      /* Also hide/show child rows according to filter */
+      var gid = header.dataset.group;
+      document.querySelectorAll('.group-child[data-group="' + gid + '"]').forEach(function(child) {
+        if (!match) { child.style.display = 'none'; }
+        else if (filter === 'running') { child.style.display = child.dataset.status === 'running' ? '' : 'none'; }
+        else if (filter === 'stopped') { child.style.display = child.dataset.status !== 'running' ? '' : 'none'; }
+        /* filter === 'all': keep current expand/collapse state untouched */
+      });
+    });
   });
 });
 </script>
