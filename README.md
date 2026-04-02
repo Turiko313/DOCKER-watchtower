@@ -23,7 +23,10 @@ DOCKER-watchtower/
 ├── .env.example                # Modele des variables d'environnement
 ├── .gitignore
 ├── dashboard/
-│   ├── app.py                  # Application Flask (dashboard web)
+│   ├── app.py                  # Application Flask (routeur principal)
+│   ├── docker_helpers.py       # Logique de requetage de l'API Docker
+│   ├── settings.py             # Logique de sauvegarde des parametres
+│   ├── watchtower_api.py       # Communications avec l'API HTTP locale Watchtower
 │   ├── requirements.txt        # Dependances Python
 │   └── templates/
 │       ├── base.html
