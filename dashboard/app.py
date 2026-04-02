@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import time
 import secrets
 import functools
@@ -180,7 +181,7 @@ def trigger_update():
         resp = http_requests.post(
             f"{WATCHTOWER_API_URL}/v1/update",
             headers={"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"},
-            timeout=30,
+            timeout=120,
         )
         if resp.status_code == 200:
             flash("Mise a jour declenchee avec succes.", "success")
@@ -245,17 +246,20 @@ def _get_update_statuses():
         logs = wt.logs(since=int(time.time()) - 86400, stdout=True, stderr=True)
         for line in logs.decode("utf-8", errors="replace").splitlines():
             line = line.strip()
-            if line.startswith("Creating /"):
-                name = line[len("Creating /"):].strip()
+            # Watchtower uses logrus; lines look like:
+            #   time="..." level=info msg="Creating /container-name"
+            m = re.search(r'Creating /([^"]+)', line)
+            if m:
+                name = m.group(1).strip()
                 if name:
                     statuses[name] = "updated"
             elif "Unable to update container" in line:
-                try:
-                    name = line.split('"')[1].lstrip("/")
+                # msg="Unable to update container \"/name\": err"
+                m = re.search(r'Unable to update container.*?/([^"\\]+)', line)
+                if m:
+                    name = m.group(1).strip()
                     if name:
                         statuses[name] = "failed"
-                except (IndexError, ValueError):
-                    pass
     except Exception:
         pass
     return statuses
