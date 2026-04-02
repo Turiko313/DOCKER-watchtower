@@ -103,8 +103,8 @@
             <td>
               {% if c.status == 'running' %}
                 <span class="badge running">running</span>
-              {% elif c.status == 'exited' %}
-                <span class="badge exited">exited{% if c.exit_code is not none %} ({{ c.exit_code }}){% endif %}</span>
+              {% elif c.status in ('exited', 'dead') %}
+                <span class="badge exited">{{ c.status }}{% if c.exit_code is not none %} ({{ c.exit_code }}){% endif %}</span>
                 {% if c.finished_at %}<div style="font-size:.75rem;color:#8b949e;margin-top:2px">arrêté {{ c.finished_at }}</div>{% endif %}
               {% elif c.status == 'removed' %}
                 <span class="badge removed">supprimé</span>
@@ -162,8 +162,8 @@
             <td>
               {% if c.status == 'running' %}
                 <span class="badge running">running</span>
-              {% elif c.status == 'exited' %}
-                <span class="badge exited">exited{% if c.exit_code is not none %} ({{ c.exit_code }}){% endif %}</span>
+              {% elif c.status in ('exited', 'dead') %}
+                <span class="badge exited">{{ c.status }}{% if c.exit_code is not none %} ({{ c.exit_code }}){% endif %}</span>
                 {% if c.finished_at %}<div style="font-size:.75rem;color:#8b949e;margin-top:2px">arrêté {{ c.finished_at }}</div>{% endif %}
               {% elif c.status == 'removed' %}
                 <span class="badge removed">supprimé</span>
@@ -214,7 +214,19 @@ document.querySelectorAll('.group-header').forEach(function(header) {
     var rows = document.querySelectorAll('.group-child[data-group="' + gid + '"]');
     var label = this.querySelector('td strong');
     var open = rows[0] && rows[0].style.display !== 'none';
-    rows.forEach(function(r) { r.style.display = open ? 'none' : ''; });
+    var activeBtn = document.querySelector('.filter-btn.active');
+    var filter = activeBtn ? activeBtn.dataset.filter : 'all';
+    if (open) {
+      rows.forEach(function(r) { r.style.display = 'none'; });
+    } else {
+      rows.forEach(function(r) {
+        if (filter === 'all') { r.style.display = ''; }
+        else if (filter === 'running') { r.style.display = r.dataset.status === 'running' ? '' : 'none'; }
+        else if (filter === 'removed') { r.style.display = r.dataset.status === 'removed' ? '' : 'none'; }
+        else if (filter === 'down') { r.style.display = r.dataset.status === 'down' ? '' : 'none'; }
+        else { r.style.display = (r.dataset.status !== 'running' && r.dataset.status !== 'removed' && r.dataset.status !== 'down') ? '' : 'none'; } /* stopped = anything not running/removed/down */
+      });
+    }
     label.textContent = label.textContent.replace(open ? '\u25bc' : '\u25b6', open ? '\u25b6' : '\u25bc');
   });
 });

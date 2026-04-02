@@ -382,15 +382,25 @@ def _list_containers():
                 # of aborting the entire loop.
                 try:
                     name = c.name or c.short_id or "unknown"
+                    _state = c.attrs.get("State", {})
+                    _status = _state.get("Status", "unknown")
+                    _exit_code = _state.get("ExitCode")
+                    _fin = _state.get("FinishedAt", "")
+                    # Docker returns "0001-01-01T00:00:00Z" when the container
+                    # has never finished; [:19] extracts "YYYY-MM-DDTHH:MM:SS".
+                    if _fin and not _fin.startswith("0001"):
+                        _fin = _fin[:19].replace("T", " ")
+                    else:
+                        _fin = ""
                     containers.append({
                         "name": name,
                         "image": c.attrs.get("Config", {}).get("Image", "unknown"),
-                        "status": c.attrs.get("State", {}).get("Status", "unknown"),
+                        "status": _status,
                         "id": c.short_id or "?",
                         "watchtower_enabled": False,
                         "created": c.attrs.get("Created", "")[:19].replace("T", " "),
-                        "exit_code": None,
-                        "finished_at": "",
+                        "exit_code": _exit_code if _status in ("exited", "dead") else None,
+                        "finished_at": _fin if _status in ("exited", "dead") else "",
                     })
                     live_names.add(name)
                 except Exception as inner_exc:
