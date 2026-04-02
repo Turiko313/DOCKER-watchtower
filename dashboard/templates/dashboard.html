@@ -165,80 +165,152 @@
 </div>
 
 <script>
-document.getElementById('updateForm').addEventListener('submit', function(e) {
-  if (!confirm('Lancer une verification de mises a jour ?')) {
-    e.preventDefault();
-    return;
-  }
-  document.getElementById('updateText').textContent = 'Verification en cours\u2026';
-  document.getElementById('updateSpinner').style.display = 'inline-block';
-  document.getElementById('updateBtn').disabled = true;
-  document.getElementById('updateBtn').style.opacity = '0.7';
-});
-document.querySelectorAll('.group-header').forEach(function(header) {
-  header.dataset.open = '0';
-  header.addEventListener('click', function() {
-    var gid = this.dataset.group;
-    var rows = document.querySelectorAll('.group-child[data-group="' + gid + '"]');
-    var label = this.querySelector('td strong');
-    var isOpen = this.dataset.open === '1';
-    var activeBtn = document.querySelector('.filter-btn.active');
-    var filter = activeBtn ? activeBtn.dataset.filter : 'all';
-    if (isOpen) {
-      this.dataset.open = '0';
-      rows.forEach(function(r) { r.style.display = 'none'; });
-    } else {
-      this.dataset.open = '1';
-      rows.forEach(function(r) {
-        if (filter === 'all') { r.style.display = ''; }
-        else if (filter === 'running') { r.style.display = r.dataset.status === 'running' ? '' : 'none'; }
-        else { r.style.display = r.dataset.status !== 'running' ? '' : 'none'; }
-      });
-    }
-    label.textContent = label.textContent.replace(isOpen ? '\u25bc' : '\u25b6', isOpen ? '\u25b6' : '\u25bc');
-  });
-});
-/* Status filter buttons */
-document.querySelectorAll('.filter-btn').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
-    this.classList.add('active');
-    var filter = this.dataset.filter;
-    /* Single-container rows */
-    document.querySelectorAll('tbody tr[data-status]:not(.group-header):not(.group-child)').forEach(function(row) {
-      if (filter === 'all') { row.style.display = ''; }
-      else if (filter === 'running') { row.style.display = row.dataset.status === 'running' ? '' : 'none'; }
-      else { row.style.display = row.dataset.status !== 'running' ? '' : 'none'; }
-    });
-    /* Group headers */
-    document.querySelectorAll('.group-header').forEach(function(header) {
-      var statuses = (header.dataset.statuses || '').split(',');
-      var match = false;
-      if (filter === 'all') { match = true; }
-      else if (filter === 'running') { match = statuses.indexOf('running') !== -1; }
-      else { match = statuses.some(function(s) { return s !== 'running'; }); }
-      header.style.display = match ? '' : 'none';
-      /* Only update children of open groups */
-      var gid = header.dataset.group;
-      var isOpen = header.dataset.open === '1';
-      document.querySelectorAll('.group-child[data-group="' + gid + '"]').forEach(function(child) {
-        if (!match || !isOpen) { child.style.display = 'none'; }
-        else if (filter === 'running') { child.style.display = child.dataset.status === 'running' ? '' : 'none'; }
-        else if (filter === 'stopped') { child.style.display = child.dataset.status !== 'running' ? '' : 'none'; }
-        else { child.style.display = ''; }
-      });
-      /* Sync arrow only for open groups */
+function bindEvents() {
+  document.querySelectorAll('.group-header').forEach(function(header) {
+    if(!header.dataset.open) header.dataset.open = '0';
+    // remove fast clone
+    var new_header = header.cloneNode(true);
+    header.parentNode.replaceChild(new_header, header);
+    new_header.addEventListener('click', function() {
+      var gid = this.dataset.group;
+      var rows = document.querySelectorAll('.group-child[data-group="' + gid + '"]');
+      var label = this.querySelector('td strong');
+      var isOpen = this.dataset.open === '1';
+      var activeBtn = document.querySelector('.filter-btn.active');
+      var filter = activeBtn ? activeBtn.dataset.filter : 'all';
       if (isOpen) {
-        var label = header.querySelector('td strong');
-        if (label) {
-          var anyVisible = Array.from(document.querySelectorAll('.group-child[data-group="' + gid + '"]')).some(function(r) { return r.style.display !== 'none'; });
-          label.textContent = label.textContent.replace(/[\u25b6\u25bc]/, anyVisible ? '\u25bc' : '\u25b6');
-          if (!anyVisible) { header.dataset.open = '0'; }
-        }
+        this.dataset.open = '0';
+        rows.forEach(function(r) { r.style.display = 'none'; });
+      } else {
+        this.dataset.open = '1';
+        rows.forEach(function(r) {
+          if (filter === 'all') { r.style.display = ''; }
+          else if (filter === 'running') { r.style.display = r.dataset.status === 'running' ? '' : 'none'; }
+          else { r.style.display = r.dataset.status !== 'running' ? '' : 'none'; }
+        });
       }
+      if(label) label.textContent = label.textContent.replace(isOpen ? '\u25bc' : '\u25b6', isOpen ? '\u25b6' : '\u25bc');
     });
   });
-});
+
+  var filterBtns = document.querySelectorAll('.filter-btn');
+  filterBtns.forEach(function(btn) {
+    var new_btn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(new_btn, btn);
+    new_btn.addEventListener('click', function() {
+      document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+      this.classList.add('active');
+      var filter = this.dataset.filter;
+      
+      document.querySelectorAll('tbody tr[data-status]:not(.group-header):not(.group-child)').forEach(function(row) {
+        if (filter === 'all') { row.style.display = ''; }
+        else if (filter === 'running') { row.style.display = row.dataset.status === 'running' ? '' : 'none'; }
+        else { row.style.display = row.dataset.status !== 'running' ? '' : 'none'; }
+      });
+      
+      document.querySelectorAll('.group-header').forEach(function(header) {
+        var statuses = (header.dataset.statuses || '').split(',');
+        var match = false;
+        if (filter === 'all') { match = true; }
+        else if (filter === 'running') { match = statuses.indexOf('running') !== -1; }
+        else { match = statuses.some(function(s) { return s !== 'running'; }); }
+        header.style.display = match ? '' : 'none';
+        
+        var gid = header.dataset.group;
+        var isOpen = header.dataset.open === '1';
+        document.querySelectorAll('.group-child[data-group="' + gid + '"]').forEach(function(child) {
+          if (!match || !isOpen) { child.style.display = 'none'; }
+          else if (filter === 'running') { child.style.display = child.dataset.status === 'running' ? '' : 'none'; }
+          else if (filter === 'stopped') { child.style.display = child.dataset.status !== 'running' ? '' : 'none'; }
+          else { child.style.display = ''; }
+        });
+        
+        if (isOpen) {
+          var label = header.querySelector('td strong');
+          if (label) {
+            var anyVisible = Array.from(document.querySelectorAll('.group-child[data-group="' + gid + '"]')).some(function(r) { return r.style.display !== 'none'; });
+            label.textContent = label.textContent.replace(/[\u25b6\u25bc]/, anyVisible ? '\u25bc' : '\u25b6');
+            if (!anyVisible) { header.dataset.open = '0'; }
+          }
+        }
+      });
+    });
+  });
+}
+
+bindEvents();
+
+/* ASYNC UPDATE TRIGGER */
+var updateForm = document.getElementById('updateForm');
+if(updateForm) {
+  updateForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    if (!confirm('Lancer une verification de mises a jour ?')) return;
+
+    var btn = document.getElementById('updateBtn');
+    var text = document.getElementById('updateText');
+    var spinner = document.getElementById('updateSpinner');
+
+    text.textContent = 'Verification en cours\u2026';
+    spinner.style.display = 'inline-block';
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+
+    fetch(this.action, { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        alert(res.message);
+      })
+      .catch(function(err) {
+        alert("Erreur lors de la communication.");
+      })
+      .finally(function() {
+        text.textContent = 'Verifier maintenant';
+        spinner.style.display = 'none';
+        btn.disabled = false;
+        btn.style.opacity = '1.0';
+        if(window.refreshDashboard) window.refreshDashboard();
+      });
+  });
+}
+
+/* AUTO REFRESH DASHBOARD WITHOUT RELOAD */
+window.refreshDashboard = function() {
+  fetch(window.location.href)
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(html, 'text/html');
+      
+      var openGroups = [];
+      document.querySelectorAll('.group-header[data-open="1"]').forEach(function(h) {
+        openGroups.push(h.dataset.group);
+      });
+
+      var activeFilter = 'all';
+      var activeBtn = document.querySelector('.filter-btn.active');
+      if (activeBtn) activeFilter = activeBtn.dataset.filter;
+
+      document.querySelector('.metrics').innerHTML = doc.querySelector('.metrics').innerHTML;
+      document.querySelector('tbody').innerHTML = doc.querySelector('tbody').innerHTML;
+
+      openGroups.forEach(function(gid) {
+         var h = document.querySelector('.group-header[data-group="'+gid+'"]');
+         if(h) h.dataset.open = '1';
+      });
+
+      bindEvents();
+
+      var newActiveBtn = document.querySelector('.filter-btn[data-filter="'+activeFilter+'"]');
+      if(newActiveBtn) newActiveBtn.click();
+    })
+    .catch(function(err) { console.error("Refresh failed:", err); });
+};
+
+// Refresh randomly every 15 to 30 seconds to avoid sync congestion
+setInterval(window.refreshDashboard, 20000);
+
 </script>
+
 
 {% endblock %}

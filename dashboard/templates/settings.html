@@ -11,7 +11,10 @@
     <div class="form-group">
       <label for="schedule">Planification cron (prioritaire sur l'intervalle)</label>
       <input type="text" id="schedule" name="schedule" value="{{ settings.schedule }}"
-             placeholder="Ex: 0 0 4 * * * (tous les jours a 4h)">
+             placeholder="Ex: 0 0 4 * * * (tous les jours à 4h)">
+      <div style="font-size: 0.8rem; color: #8b949e; margin-top: 0.25rem;">
+        Note: Watchtower requiert un format cron à 6 champs (Secondes Minutes Heures Jours Mois JoursSemaine).
+      </div>
     </div>
 
     <div class="form-group">
