@@ -271,73 +271,73 @@ def _list_compose_services():
     if not dirs:
         return found
 
-    patterns = [
-        "docker-compose.yml",
-        "docker-compose.yaml",
-        "compose.yml",
-        "compose.yaml",
-    ]
+    seen_files = set()
 
     for base_dir in dirs:
-        for pattern in patterns:
-            for filepath in glob.glob(
-                os.path.join(base_dir, "**", pattern), recursive=True
-            ):
-                try:
-                    with open(filepath, "r") as fh:
-                        data = yaml.safe_load(fh)
-                    if not isinstance(data, dict) or "services" not in data:
-                        continue
+        # Scan ALL .yml/.yaml files — OMV7 and other tools may use
+        # non-standard filenames.  We validate content (services: key)
+        # so false-positives are harmless.
+        for filepath in glob.glob(
+            os.path.join(base_dir, "**", "*.y*ml"), recursive=True
+        ):
+            if filepath in seen_files:
+                continue
+            seen_files.add(filepath)
+            try:
+                with open(filepath, "r") as fh:
+                    data = yaml.safe_load(fh)
+                if not isinstance(data, dict) or "services" not in data:
+                    continue
 
-                    # Derive project name from the directory that holds the file
-                    # (docker compose v2 convention: strip non-alphanumeric chars).
-                    raw_project = os.path.basename(os.path.dirname(filepath))
-                    project_name = re.sub(r"[^a-z0-9]", "", raw_project.lower())
+                # Derive project name from the directory that holds the file
+                # (docker compose v2 convention: strip non-alphanumeric chars).
+                raw_project = os.path.basename(os.path.dirname(filepath))
+                project_name = re.sub(r"[^a-z0-9]", "", raw_project.lower())
 
-                    for svc_name, svc_cfg in (data.get("services") or {}).items():
-                        if not isinstance(svc_cfg, dict):
-                            svc_cfg = {}
-                        # Explicit container_name wins; otherwise use the
-                        # docker-compose v2 default: <project>-<service>-1
-                        container_name = svc_cfg.get("container_name")
-                        if not container_name:
-                            container_name = f"{project_name}-{svc_name}-1"
+                for svc_name, svc_cfg in (data.get("services") or {}).items():
+                    if not isinstance(svc_cfg, dict):
+                        svc_cfg = {}
+                    # Explicit container_name wins; otherwise use the
+                    # docker-compose v2 default: <project>-<service>-1
+                    container_name = svc_cfg.get("container_name")
+                    if not container_name:
+                        container_name = f"{project_name}-{svc_name}-1"
 
-                        image = svc_cfg.get("image") or "unknown"
+                    image = svc_cfg.get("image") or "unknown"
 
-                        # Determine watchtower-enable from service labels.
-                        # Labels may be a list ["key=value", ...] or a dict.
-                        wt_enabled = True
-                        raw_labels = svc_cfg.get("labels") or {}
-                        if isinstance(raw_labels, list):
-                            label_dict = {}
-                            for item in raw_labels:
-                                if "=" in item:
-                                    k, _, v = item.partition("=")
-                                    label_dict[k.strip()] = v.strip()
-                            raw_labels = label_dict
-                        wt_label = raw_labels.get(
-                            "com.centurylinklabs.watchtower.enable"
-                        )
-                        if wt_label is not None:
-                            wt_enabled = str(wt_label).lower() != "false"
-                        found.append(
-                            {
-                                "name": container_name,
-                                "image": image,
-                                "status": "down",
-                                "id": "—",
-                                "watchtower_enabled": wt_enabled,
-                                "created": "",
-                                "exit_code": None,
-                                "finished_at": "",
-                                "compose_file": filepath,
-                            }
-                        )
-                except Exception as exc:
-                    app.logger.warning(
-                        "Could not parse compose file %s: %s", filepath, exc
+                    # Determine watchtower-enable from service labels.
+                    # Labels may be a list ["key=value", ...] or a dict.
+                    wt_enabled = True
+                    raw_labels = svc_cfg.get("labels") or {}
+                    if isinstance(raw_labels, list):
+                        label_dict = {}
+                        for item in raw_labels:
+                            if "=" in item:
+                                k, _, v = item.partition("=")
+                                label_dict[k.strip()] = v.strip()
+                        raw_labels = label_dict
+                    wt_label = raw_labels.get(
+                        "com.centurylinklabs.watchtower.enable"
                     )
+                    if wt_label is not None:
+                        wt_enabled = str(wt_label).lower() != "false"
+                    found.append(
+                        {
+                            "name": container_name,
+                            "image": image,
+                            "status": "down",
+                            "id": "—",
+                            "watchtower_enabled": wt_enabled,
+                            "created": "",
+                            "exit_code": None,
+                            "finished_at": "",
+                            "compose_file": filepath,
+                        }
+                    )
+            except Exception as exc:
+                app.logger.warning(
+                    "Could not parse compose file %s: %s", filepath, exc
+                )
     return found
 
 
