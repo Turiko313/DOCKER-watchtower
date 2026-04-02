@@ -73,6 +73,7 @@ except (FileNotFoundError, json.JSONDecodeError, Exception) as exc:
     print(f"[start_watchtower] Warning: could not load settings: {exc}", file=sys.stderr)
     # Safe defaults so watchtower always has periodic checking
     os.environ.setdefault("WATCHTOWER_POLL_INTERVAL", "86400")
+    os.environ.setdefault("WATCHTOWER_NO_STARTUP_MESSAGE", "true")
     print("[start_watchtower] Fallback: poll interval 86400s", file=sys.stderr)
 
 # ---------------------------------------------------------------------------

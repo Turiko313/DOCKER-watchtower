@@ -6,6 +6,7 @@ import time
 import secrets
 import functools
 import subprocess
+from datetime import timedelta
 
 import yaml
 from flask import Flask, render_template, request, redirect, url_for, session, flash
@@ -17,6 +18,7 @@ import requests as http_requests
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or "dev-secret-key"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 
 REMEMBER_DAYS = 30
 REMEMBER_SECONDS = REMEMBER_DAYS * 24 * 3600
@@ -114,6 +116,7 @@ def login_required(f):
         token = request.cookies.get("remember_token")
         if _validate_remember_token(token):
             session["logged_in"] = True
+            session.permanent = True
             return f(*args, **kwargs)
         return redirect(url_for("login"))
     return wrapper
@@ -129,6 +132,7 @@ def _auto_login_from_remember_token():
     token = request.cookies.get("remember_token")
     if _validate_remember_token(token):
         session["logged_in"] = True
+        session.permanent = True
 
 
 @app.after_request
@@ -160,6 +164,7 @@ def login():
         if (request.form.get("username") == DASHBOARD_USERNAME
                 and request.form.get("password") == DASHBOARD_PASSWORD):
             session["logged_in"] = True
+            session.permanent = True
             resp = redirect(url_for("dashboard"))
             if request.form.get("remember_me"):
                 token = _create_remember_token()
@@ -533,7 +538,7 @@ _DEFAULTS = {
     "label_enable": False,
     "rolling_restart": False,
     "log_level": "info",
-    "no_startup_message": False,
+    "no_startup_message": True,
     "timeout": "30",
     "notifications_discord": False,
     "discord_webhook_url": "",
