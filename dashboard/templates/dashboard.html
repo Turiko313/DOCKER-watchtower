@@ -138,7 +138,7 @@
           {% set down = group|selectattr('status','equalto','down')|list|length %}
           {% set stopped = group|length - running - removed - down %}
           <tr class="group-header" data-group="{{ ns.gid }}" data-statuses="{{ group|map(attribute='status')|join(',') }}">
-            <td><strong>▶ {{ group|length }} conteneurs</strong></td>
+            <td><strong>▼ {{ group|length }} conteneurs</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ image }}</td>
             <td>
               <span class="badge running">{{ running }}/{{ group|length }}</span>
@@ -156,7 +156,7 @@
             <td></td>
           </tr>
           {% for c in group %}
-          <tr class="group-child" data-group="{{ ns.gid }}" data-status="{{ c.status }}" style="display:none">
+          <tr class="group-child" data-group="{{ ns.gid }}" data-status="{{ c.status }}">
             <td style="padding-left:2rem">↳ <strong>{{ c.name }}</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
             <td>
@@ -213,7 +213,7 @@ document.querySelectorAll('.group-header').forEach(function(header) {
     var gid = this.dataset.group;
     var rows = document.querySelectorAll('.group-child[data-group="' + gid + '"]');
     var label = this.querySelector('td strong');
-    var open = rows[0] && rows[0].style.display !== 'none';
+    var open = rows.length > 0 && Array.from(rows).some(function(r) { return r.style.display !== 'none'; });
     var activeBtn = document.querySelector('.filter-btn.active');
     var filter = activeBtn ? activeBtn.dataset.filter : 'all';
     if (open) {
@@ -256,14 +256,20 @@ document.querySelectorAll('.filter-btn').forEach(function(btn) {
       header.style.display = match ? '' : 'none';
       /* Also hide/show child rows according to filter */
       var gid = header.dataset.group;
+      var label = header.querySelector('td strong');
       document.querySelectorAll('.group-child[data-group="' + gid + '"]').forEach(function(child) {
         if (!match) { child.style.display = 'none'; }
         else if (filter === 'running') { child.style.display = child.dataset.status === 'running' ? '' : 'none'; }
         else if (filter === 'stopped') { child.style.display = (child.dataset.status !== 'running' && child.dataset.status !== 'removed' && child.dataset.status !== 'down') ? '' : 'none'; }
         else if (filter === 'removed') { child.style.display = child.dataset.status === 'removed' ? '' : 'none'; }
         else if (filter === 'down') { child.style.display = child.dataset.status === 'down' ? '' : 'none'; }
-        /* filter === 'all': keep current expand/collapse state untouched */
+        else { child.style.display = ''; } /* filter === 'all': show all children */
       });
+      /* Sync the expand/collapse arrow with actual child visibility */
+      if (label) {
+        var anyVisible = Array.from(document.querySelectorAll('.group-child[data-group="' + gid + '"]')).some(function(r) { return r.style.display !== 'none'; });
+        label.textContent = label.textContent.replace(/[\u25b6\u25bc]/, anyVisible ? '\u25bc' : '\u25b6');
+      }
     });
   });
 });
