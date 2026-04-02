@@ -6,6 +6,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - watchtower_config:/config
+      # Mount your compose stacks directory so the dashboard can detect down
+      # services (OMV7 / automatic cleanup support).  Adjust the host path to
+      # match the directory where OMV7 (or your compose plugin) stores stacks.
+      # Example:  - /compose:/compose:ro
+      # - ${COMPOSE_STACKS_DIR:-/compose}:${COMPOSE_STACKS_DIR:-/compose}:ro
     environment:
       - TZ=${TZ:-Europe/Paris}
       - DOCKER_API_VERSION=1.40
@@ -20,6 +25,10 @@ services:
       # GHCR private registry (optional)
       - GHCR_USERNAME=${GHCR_USERNAME:-}
       - GHCR_TOKEN=${GHCR_TOKEN:-}
+      # Compose-file discovery: comma-separated paths inside the container to
+      # scan for docker-compose YAML files (OMV7 down-stack detection).
+      # Set to the same path you mounted above, e.g.: COMPOSE_DIRS=/compose
+      - COMPOSE_DIRS=${COMPOSE_DIRS:-}
     ports:
       - "8080:8080"
       - "${DASHBOARD_PORT:-8888}:5000"
