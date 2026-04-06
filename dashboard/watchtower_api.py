@@ -56,7 +56,8 @@ def get_watchtower_metrics():
     keys_to_track = [
         "watchtower_containers_updated",
         "watchtower_scans_total",
-        "watchtower_scans_skipped"
+        "watchtower_scans_skipped",
+        "watchtower_scans_failed"
     ]
     
     result = {}

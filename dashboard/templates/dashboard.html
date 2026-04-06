@@ -19,28 +19,23 @@
     <div class="value">{{ containers|selectattr('watchtower_enabled')|list|length }}</div>
     <div class="label">Surveilles</div>
   </div>
-  {% if metrics.get('watchtower_containers_updated') %}
   <div class="metric-card">
-    <div class="value">{{ metrics['watchtower_containers_updated']|int }}</div>
+    <div class="value">{{ metrics.get('watchtower_containers_updated', 0)|int }}</div>
     <div class="label">Mis a jour</div>
   </div>
-  {% endif %}
-  {% if metrics.get('watchtower_scans_total') %}
   <div class="metric-card">
-    <div class="value">{{ metrics['watchtower_scans_total']|int }}</div>
+    <div class="value">{{ metrics.get('watchtower_scans_total', 0)|int }}</div>
     <div class="label">Scans total</div>
   </div>
-  {% endif %}
-  {% if metrics.get('watchtower_scans_skipped') %}
   <div class="metric-card">
-    <div class="value">{{ metrics['watchtower_scans_skipped']|int }}</div>
+    <div class="value">{{ metrics.get('watchtower_scans_skipped', 0)|int }}</div>
     <div class="label">Scans ignores</div>
   </div>
-  {% endif %}
   {% set failed_count = update_statuses.values()|select('equalto','failed')|list|length %}
-  {% if failed_count > 0 %}
+  {% set total_failed = failed_count + metrics.get('watchtower_scans_failed', 0)|int %}
+  {% if total_failed > 0 %}
   <div class="metric-card" style="border-color:#da3633">
-    <div class="value" style="color:#f85149">{{ failed_count }}</div>
+    <div class="value" style="color:#f85149">{{ total_failed }}</div>
     <div class="label">Erreurs</div>
   </div>
   {% endif %}
