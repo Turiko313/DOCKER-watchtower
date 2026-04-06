@@ -30,6 +30,8 @@ def load_settings():
     return settings
 
 def save_settings(form):
+    errors = []
+
     try:
         poll_interval = str(max(60, int(form.get("poll_interval") or 86400)))
     except (ValueError, TypeError):
@@ -44,9 +46,17 @@ def save_settings(form):
     if log_level not in ("debug", "info", "warn", "error", "fatal", "panic"):
         log_level = "info"
 
+    # Validation du format Cron (Watchtower exige 6 champs ou des macros type @daily)
+    schedule = form.get("schedule", "").strip()
+    if schedule and not schedule.startswith("@"):
+        parts = schedule.split()
+        if len(parts) != 6:
+            errors.append("Le format cron est invalide. Il doit contenir exactement 6 champs. La planification cron a ete desactivee.")
+            schedule = ""
+
     settings = {
         "poll_interval": poll_interval,
-        "schedule": form.get("schedule", "").strip(),
+        "schedule": schedule,
         "cleanup": "cleanup" in form,
         "include_stopped": "include_stopped" in form,
         "revive_stopped": "revive_stopped" in form,
@@ -59,6 +69,9 @@ def save_settings(form):
         "notifications_discord": "notifications_discord" in form,
         "discord_webhook_url": form.get("discord_webhook_url", "").strip(),
     }
+
     os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(SETTINGS_FILE, "w") as fh:
         json.dump(settings, fh, indent=2)
+
+    return errors

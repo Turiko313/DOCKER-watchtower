@@ -144,10 +144,14 @@ def trigger_update():
 @login_required
 def settings():
     if request.method == "POST":
-        save_settings(request.form)
+        errors = save_settings(request.form)
+        for err in errors:
+            flash(err, "error")
         ok = restart_watchtower()
-        if ok:
+        if ok and not errors:
             flash("Parametres sauvegardes. Watchtower redemarre.", "success")
+        elif ok and errors:
+            flash("Parametres sauvegardes avec erreurs. Watchtower redemarre.", "success")
         return redirect(url_for("settings"))
     current = load_settings()
     return render_template("settings.html", settings=current)
