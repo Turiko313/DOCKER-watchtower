@@ -33,6 +33,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Dashboard code - copy each file explicitly
 COPY dashboard/app.py ./app.py
+COPY dashboard/docker_helpers.py ./docker_helpers.py
+COPY dashboard/settings.py ./settings.py
+COPY dashboard/watchtower_api.py ./watchtower_api.py
 COPY dashboard/templates/ ./templates/
 
 # Verify files are present
