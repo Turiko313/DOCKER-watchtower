@@ -10,7 +10,7 @@ import requests as http_requests
 
 from docker_helpers import list_containers, get_update_statuses
 from settings import load_settings, save_settings
-from watchtower_api import get_watchtower_metrics, restart_watchtower, WATCHTOWER_API_URL, WATCHTOWER_API_TOKEN
+from watchtower_api import get_watchtower_metrics, reset_metrics, restart_watchtower, WATCHTOWER_API_URL, WATCHTOWER_API_TOKEN
 
 # ---------------------------------------------------------------------------
 # Flask application
@@ -155,6 +155,13 @@ def settings():
         return redirect(url_for("settings"))
     current = load_settings()
     return render_template("settings.html", settings=current)
+
+@app.route("/reset_metrics", methods=["POST"])
+@login_required
+def reset_metrics_route():
+    reset_metrics()
+    flash("Metriques reinitialisees.", "success")
+    return redirect(url_for("settings"))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
