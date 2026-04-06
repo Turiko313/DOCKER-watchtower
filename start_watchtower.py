@@ -76,6 +76,10 @@ except (FileNotFoundError, json.JSONDecodeError, Exception) as exc:
     os.environ.setdefault("WATCHTOWER_NO_STARTUP_MESSAGE", "true")
     print("[start_watchtower] Fallback: poll interval 86400s", file=sys.stderr)
 
+# CRITICAL: Since we use WATCHTOWER_HTTP_API_UPDATE=true, Watchtower normally
+# disables background polling. We MUST force periodic polls back on.
+os.environ["WATCHTOWER_HTTP_API_PERIODIC_POLLS"] = "true"
+
 # ---------------------------------------------------------------------------
 # GHCR private registry authentication
 # ---------------------------------------------------------------------------
