@@ -5,7 +5,7 @@ Deploiement personnalise de **[Watchtower](https://containrrr.dev/watchtower/)**
 - Mise a jour automatique des conteneurs Docker selon un planning configurable
 - Interface web locale protegee par mot de passe
 - Notifications Discord (ou tout service shoutrrr) lors des mises a jour
-- Tableau de bord : statuts, uptime, historique des mises a jour, metriques
+- Tableau de bord : statuts, uptime, historique des mises a jour, metriques persistantes avec remise a zero
 - **Page Parametres** : configurez Watchtower entierement depuis le navigateur
 - **Bouton Redemarrer** : appliquez les nouveaux parametres en un clic
 - **Se souvenir de moi** : session persistante de 30 jours pour eviter de se reconnecter
@@ -179,9 +179,10 @@ Fonctionnalites :
 - **Liste des conteneurs** : nom, image, statut, uptime
 - **Historique** : logs filtres de Watchtower
 - **Verification immediate** : lancer une mise a jour via l'API Watchtower
-- **Redemarrage** : recree le conteneur Watchtower avec les parametres enregistres
+- **Redemarrage** : applique les nouveaux parametres (via supervisorctl)
 - **Parametres** : configurez et sauvegardez toutes les options Watchtower
-- **Se souvenir de moi** : cochez la case a la connexion pour rester connecte 30 jours
+- **Remise a zero metriques** : remet a zero les compteurs globaux de scans et d'erreurs historiques
+- **Authentification sans etat** : connexion par cookie signe valable 30 jours
 
 ---
 
@@ -214,8 +215,8 @@ docker compose up -d --build dashboard
 - Watchtower et le dashboard sont **exclus de la surveillance automatique**
   via l'etiquette `com.centurylinklabs.watchtower.enable=false`.
 - Les identifiants sont stockes **uniquement dans `.env`** qui ne doit jamais etre commite.
-- L'option **Se souvenir de moi** utilise un cookie de session Flask signe,
-  valable 30 jours. La session peut etre revoquee a tout moment via **Deconnexion**.
+- L'option **Authentification** utilise un cookie signe `auth_token`,
+  valable 30 jours (identique a FileBrowser). La session n'a plus d'etat et est resistante aux redemarrages.
 
 ---
 
