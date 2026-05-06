@@ -91,14 +91,13 @@
 
     <hr style="border-color:#30363d;margin:1.25rem 0">
 
-    <div style="display:flex;align-items:center;gap:1rem;">
-      <button type="submit" class="btn btn-primary">Sauvegarder et redemarrer</button>
+    <button type="submit" class="btn btn-primary">Sauvegarder et redemarrer</button>
   </form>
 
-  <form method="POST" action="{{ url_for('reset_metrics_route') }}" onsubmit="return confirm('Etes-vous sur de vouloir remettre les metriques a zero ?');">
+  <form method="POST" action="{{ url_for('reset_metrics_route') }}" style="margin-top:.75rem"
+        onsubmit="return confirm('Etes-vous sur de vouloir remettre les metriques a zero ?');">
     <button type="submit" class="btn btn-danger">Remise a zero metriques</button>
   </form>
-    </div>
 </div>
 
 {% endblock %}

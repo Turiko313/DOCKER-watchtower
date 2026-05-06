@@ -49,6 +49,6 @@ RUN chmod +x /usr/local/bin/start_watchtower.py
 LABEL org.opencontainers.image.source="https://github.com/turiko313/DOCKER-watchtower"
 LABEL org.opencontainers.image.description="Watchtower + Dashboard"
 
-EXPOSE 8080 5000
+EXPOSE 5000
 
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

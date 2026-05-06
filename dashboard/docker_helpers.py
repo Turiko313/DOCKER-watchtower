@@ -88,13 +88,13 @@ def get_update_statuses():
         logs = wt.logs(since=int(time.time()) - 86400, stdout=True, stderr=True)
         for line in logs.decode("utf-8", errors="replace").splitlines():
             line = line.strip()
-            m = re.search(r'Creating /([^"]+)', line)
+            m = re.search(r'Creating /([^\s"]+)', line)
             if m:
                 name = m.group(1).strip()
                 if name:
                     statuses[name] = "updated"
             elif "Unable to update container" in line:
-                m = re.search(r'Unable to update container.*?/([^"\\]+)', line)
+                m = re.search(r'Unable to update container.*?/([^\s"\\]+)', line)
                 if m:
                     name = m.group(1).strip()
                     if name:

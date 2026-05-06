@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read /config/watchtower.json settings, set env vars, then exec watchtower."""
 
+import base64
 import json
 import os
 import sys
@@ -69,7 +70,7 @@ try:
         os.environ.pop("WATCHTOWER_NOTIFICATION_URL", None)
 
     print(f"[start_watchtower] Settings loaded from {SETTINGS_FILE}", file=sys.stderr)
-except (FileNotFoundError, json.JSONDecodeError, Exception) as exc:
+except Exception as exc:
     print(f"[start_watchtower] Warning: could not load settings: {exc}", file=sys.stderr)
     # Safe defaults so watchtower always has periodic checking
     os.environ.setdefault("WATCHTOWER_POLL_INTERVAL", "86400")
@@ -83,8 +84,6 @@ os.environ["WATCHTOWER_HTTP_API_PERIODIC_POLLS"] = "true"
 # ---------------------------------------------------------------------------
 # GHCR private registry authentication
 # ---------------------------------------------------------------------------
-import base64
-
 ghcr_user = os.environ.get("GHCR_USERNAME", "").strip()
 ghcr_token = os.environ.get("GHCR_TOKEN", "").strip()
 
