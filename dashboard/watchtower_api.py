@@ -33,7 +33,7 @@ def parse_prometheus(text):
         parts = line.split()
         if len(parts) >= 2:
             try:
-                metrics[parts[0]] = int(parts[1])
+                metrics[parts[0]] = int(float(parts[1]))
             except ValueError:
                 pass
     return metrics

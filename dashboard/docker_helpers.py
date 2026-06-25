@@ -6,14 +6,21 @@ from flask import flash
 
 logger = logging.getLogger(__name__)
 
-docker_client = docker.from_env(version="auto")
+docker_client = None
 
 def get_docker_client():
     global docker_client
     try:
+        if docker_client is None:
+            docker_client = docker.from_env(version="auto")
         docker_client.ping()
     except Exception:
-        docker_client = docker.from_env(version="auto")
+        try:
+            docker_client = docker.from_env(version="auto")
+            docker_client.ping()
+        except Exception:
+            docker_client = None
+            raise
     return docker_client
 
 def list_containers():

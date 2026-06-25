@@ -102,6 +102,10 @@ def login():
                 max_age=AUTH_MAX_AGE,
                 httponly=True,
                 samesite="Lax",
+                secure=(
+                    request.is_secure
+                    or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+                ),
             )
             return resp
         flash("Identifiants incorrects.", "error")
