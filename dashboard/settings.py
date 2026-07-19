@@ -1,5 +1,6 @@
 import os
 import json
+import tempfile
 
 CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
@@ -24,10 +25,31 @@ def load_settings():
     settings = dict(DEFAULTS)
     try:
         with open(SETTINGS_FILE, "r") as fh:
-            settings.update(json.load(fh))
-    except (FileNotFoundError, json.JSONDecodeError):
+            saved_settings = json.load(fh)
+        if isinstance(saved_settings, dict):
+            settings.update(saved_settings)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
     return settings
+
+
+def _write_settings(settings):
+    """Atomically replace the configuration to avoid a partial JSON file."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    fd, temporary_file = tempfile.mkstemp(dir=CONFIG_DIR, prefix=".watchtower-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(settings, fh, indent=2)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temporary_file, SETTINGS_FILE)
+    except OSError:
+        try:
+            os.unlink(temporary_file)
+        except FileNotFoundError:
+            pass
+        raise
 
 def save_settings(form):
     errors = []
@@ -70,8 +92,6 @@ def save_settings(form):
         "discord_webhook_url": form.get("discord_webhook_url", "").strip(),
     }
 
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(SETTINGS_FILE, "w") as fh:
-        json.dump(settings, fh, indent=2)
+    _write_settings(settings)
 
     return errors

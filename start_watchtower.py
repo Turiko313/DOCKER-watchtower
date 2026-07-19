@@ -56,7 +56,10 @@ try:
         timeout = "30"
     os.environ["WATCHTOWER_TIMEOUT"] = timeout
 
-    # Discord notifications via shoutrrr
+    # Discord notifications via shoutrrr. Clear both variables first so an
+    # invalid or disabled setting cannot inherit a stale environment value.
+    os.environ.pop("WATCHTOWER_NOTIFICATIONS", None)
+    os.environ.pop("WATCHTOWER_NOTIFICATION_URL", None)
     if s.get("notifications_discord") and s.get("discord_webhook_url"):
         url = s["discord_webhook_url"].strip()
         if "/api/webhooks/" in url:
@@ -65,9 +68,6 @@ try:
                 os.environ["WATCHTOWER_NOTIFICATIONS"] = "shoutrrr"
                 os.environ["WATCHTOWER_NOTIFICATION_URL"] = f"discord://{parts[1]}@{parts[0]}"
                 print("[start_watchtower] Discord notifications enabled.", file=sys.stderr)
-    else:
-        os.environ.pop("WATCHTOWER_NOTIFICATIONS", None)
-        os.environ.pop("WATCHTOWER_NOTIFICATION_URL", None)
 
     print(f"[start_watchtower] Settings loaded from {SETTINGS_FILE}", file=sys.stderr)
 except Exception as exc:
