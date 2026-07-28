@@ -12,9 +12,6 @@ __pycache__/
 venv/
 env/
 
-# Docker build cache
-.dockerignore
-
 # Editor / IDE files
 .vscode/
 .idea/

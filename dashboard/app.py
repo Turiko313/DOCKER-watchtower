@@ -1,171 +1,201 @@
+import base64
+import hashlib
+import hmac
 import os
-import time
 import secrets
-import functools
-from collections import defaultdict
 
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, url_for
 import requests as http_requests
 
-from docker_helpers import list_containers, get_update_statuses
+from docker_helpers import get_update_statuses, list_containers
 from settings import load_settings, save_settings
-from watchtower_api import get_watchtower_metrics, reset_metrics, restart_watchtower, WATCHTOWER_API_URL, WATCHTOWER_API_TOKEN
+from watchtower_api import (
+    WATCHTOWER_API_TOKEN,
+    WATCHTOWER_API_URL,
+    get_watchtower_metrics,
+    reset_metrics,
+    restart_watchtower,
+)
 
-# ---------------------------------------------------------------------------
-# Flask application
-# ---------------------------------------------------------------------------
+
+def _read_required_secret(name):
+    """Load a required secret from NAME or NAME_FILE."""
+    file_path = os.environ.get(f"{name}_FILE", "").strip()
+    if file_path:
+        try:
+            with open(file_path, "r", encoding="utf-8") as secret_file:
+                value = secret_file.read().strip()
+        except OSError as exc:
+            raise RuntimeError(f"Impossible de lire {name}_FILE") from exc
+    else:
+        value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} est obligatoire")
+    return value
+
+
 app = Flask(__name__)
+_secret_key = _read_required_secret("SECRET_KEY")
+if len(_secret_key) < 32:
+    raise RuntimeError("SECRET_KEY doit contenir au moins 32 caracteres")
+app.config.update(MAX_CONTENT_LENGTH=64 * 1024, SECRET_KEY=_secret_key)
 
-_provided_key = os.environ.get("SECRET_KEY", "").strip()
-if not _provided_key:
-    _provided_key = secrets.token_hex(32)
-    app.logger.warning("SECRET_KEY non definie ! Une cle aleatoire a ete generee.")
-app.secret_key = _provided_key
+DASHBOARD_USERNAME = _read_required_secret("DASHBOARD_USERNAME")
+DASHBOARD_PASSWORD = _read_required_secret("DASHBOARD_PASSWORD")
+if ":" in DASHBOARD_USERNAME:
+    raise RuntimeError("DASHBOARD_USERNAME ne doit pas contenir ':'")
+if len(DASHBOARD_PASSWORD) < 12:
+    raise RuntimeError("DASHBOARD_PASSWORD doit contenir au moins 12 caracteres")
 
-# ---------------------------------------------------------------------------
-# Configuration from environment
-# ---------------------------------------------------------------------------
-DASHBOARD_USERNAME = os.environ.get("DASHBOARD_USERNAME", "admin")
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "admin")
+# The token is deterministic across Gunicorn workers, but cannot be guessed
+# without SECRET_KEY. Rotating SECRET_KEY invalidates it immediately.
+_csrf_digest = hmac.new(
+    app.secret_key.encode("utf-8"),
+    b"watchtower-dashboard-csrf-v1",
+    hashlib.sha256,
+).digest()
+CSRF_TOKEN = base64.urlsafe_b64encode(_csrf_digest).decode("ascii").rstrip("=")
+_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-# ---------------------------------------------------------------------------
-# Signed-cookie authentication (session-independent, like FileBrowser)
-# ---------------------------------------------------------------------------
-AUTH_COOKIE = "auth_token"
-AUTH_MAX_AGE = 30 * 24 * 3600  # 30 days
 
-_auth_serializer = URLSafeTimedSerializer(app.secret_key)
-
-def _create_auth_token(username):
-    return _auth_serializer.dumps({"u": username})
-
-def _verify_auth_token(token):
-    try:
-        data = _auth_serializer.loads(token, max_age=AUTH_MAX_AGE)
-        return data.get("u") == DASHBOARD_USERNAME
-    except (BadSignature, SignatureExpired):
+def _check_auth(auth):
+    if not auth:
         return False
+    username_matches = secrets.compare_digest(
+        auth.username or "", DASHBOARD_USERNAME
+    )
+    password_matches = secrets.compare_digest(
+        auth.password or "", DASHBOARD_PASSWORD
+    )
+    return username_matches & password_matches
 
-def _is_logged_in():
-    token = request.cookies.get(AUTH_COOKIE)
-    return bool(token) and _verify_auth_token(token)
+
+def _auth_failed_response():
+    return Response(
+        "Authentification requise",
+        401,
+        {
+            "WWW-Authenticate": 'Basic realm="Watchtower Dashboard", charset="UTF-8"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def _csrf_valid():
+    token = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
+    return bool(token and secrets.compare_digest(token, CSRF_TOKEN))
+
+
+@app.before_request
+def _protect_request():
+    if not _check_auth(request.authorization):
+        return _auth_failed_response()
+    if request.method in _WRITE_METHODS and not _csrf_valid():
+        return jsonify({"status": "error", "message": "Jeton CSRF invalide."}), 403
+    return None
+
+
+@app.after_request
+def _security_headers(response):
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "base-uri 'none'; "
+        "connect-src 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'; "
+        "img-src 'self' data:; "
+        "object-src 'none'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'"
+    )
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
 
 @app.context_processor
-def _inject_auth():
-    return {"logged_in": _is_logged_in()}
+def _inject_security_context():
+    return {"csrf_token": CSRF_TOKEN}
 
-def login_required(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        if not _is_logged_in():
-            return redirect(url_for("login"))
-        return f(*args, **kwargs)
-    return wrapper
-
-# ---------------------------------------------------------------------------
-# Rate limiting on /login (in-memory, per IP)
-# ---------------------------------------------------------------------------
-_LOGIN_MAX_ATTEMPTS = 5
-_LOGIN_WINDOW_SECONDS = 60
-_login_attempts: dict[str, list[float]] = defaultdict(list)
-
-def _is_rate_limited(ip: str) -> bool:
-    now = time.time()
-    cutoff = now - _LOGIN_WINDOW_SECONDS
-    _login_attempts[ip] = [t for t in _login_attempts[ip] if t > cutoff]
-    return len(_login_attempts[ip]) >= _LOGIN_MAX_ATTEMPTS
-
-def _record_login_attempt(ip: str) -> None:
-    _login_attempts[ip].append(time.time())
-
-# ===========================================================================
-# Routes
-# ===========================================================================
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if _is_logged_in():
-        return redirect(url_for("dashboard"))
-    if request.method == "POST":
-        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
-        if _is_rate_limited(client_ip):
-            flash("Trop de tentatives. Reessayez dans une minute.", "error")
-            return render_template("login.html")
-        _record_login_attempt(client_ip)
-        if (request.form.get("username") == DASHBOARD_USERNAME
-                and request.form.get("password") == DASHBOARD_PASSWORD):
-            _login_attempts.pop(client_ip, None)
-            resp = redirect(url_for("dashboard"))
-            resp.set_cookie(
-                AUTH_COOKIE,
-                _create_auth_token(DASHBOARD_USERNAME),
-                max_age=AUTH_MAX_AGE,
-                httponly=True,
-                samesite="Lax",
-                secure=(
-                    request.is_secure
-                    or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
-                ),
-            )
-            return resp
-        flash("Identifiants incorrects.", "error")
-    return render_template("login.html")
-
-@app.route("/logout")
-def logout():
-    resp = redirect(url_for("login"))
-    resp.delete_cookie(AUTH_COOKIE)
-    return resp
 
 @app.route("/")
-@login_required
 def dashboard():
     containers = list_containers()
     metrics = get_watchtower_metrics()
     update_statuses = get_update_statuses()
     grouped = {}
-    for c in containers:
-        grouped.setdefault(c["image"], []).append(c)
-    return render_template("dashboard.html", containers=containers, metrics=metrics, update_statuses=update_statuses, grouped=grouped)
+    for container in containers:
+        grouped.setdefault(container["image"], []).append(container)
+    return render_template(
+        "dashboard.html",
+        containers=containers,
+        metrics=metrics,
+        update_statuses=update_statuses,
+        grouped=grouped,
+    )
+
 
 @app.route("/update", methods=["POST"])
-@login_required
 def trigger_update():
     try:
-        resp = http_requests.post(
+        response = http_requests.post(
             f"{WATCHTOWER_API_URL}/v1/update",
             headers={"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"},
             timeout=120,
         )
-        if resp.status_code == 200:
-            return jsonify({"status": "success", "message": "Mise a jour declenchee avec succes."})
-        else:
-            return jsonify({"status": "error", "message": f"Watchtower a repondu avec le code {resp.status_code}."}), 500
-    except Exception as exc:
-        return jsonify({"status": "error", "message": f"Impossible de contacter Watchtower : {exc}"}), 500
+        if response.status_code == 200:
+            return jsonify(
+                {"status": "success", "message": "Mise a jour declenchee avec succes."}
+            )
+        app.logger.warning("Watchtower update API returned HTTP %s", response.status_code)
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Watchtower a repondu avec le code {response.status_code}.",
+            }
+        ), 502
+    except http_requests.RequestException:
+        app.logger.exception("Unable to reach the Watchtower update API")
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Impossible de contacter le service Watchtower.",
+            }
+        ), 502
+
 
 @app.route("/settings", methods=["GET", "POST"])
-@login_required
 def settings():
     if request.method == "POST":
         errors = save_settings(request.form)
-        for err in errors:
-            flash(err, "error")
-        ok = restart_watchtower()
-        if ok and not errors:
+        for error in errors:
+            flash(error, "error")
+        restarted = restart_watchtower()
+        if restarted and not errors:
             flash("Parametres sauvegardes. Watchtower redemarre.", "success")
-        elif ok and errors:
+        elif restarted:
             flash("Parametres sauvegardes avec erreurs. Watchtower redemarre.", "success")
         return redirect(url_for("settings"))
+
     current = load_settings()
+    # Never send the Discord webhook token back to the browser.
+    current["discord_webhook_configured"] = bool(current.get("discord_webhook_url"))
+    current["discord_webhook_url"] = ""
     return render_template("settings.html", settings=current)
 
+
 @app.route("/reset_metrics", methods=["POST"])
-@login_required
 def reset_metrics_route():
     reset_metrics()
     flash("Metriques reinitialisees.", "success")
     return redirect(url_for("settings"))
 
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=False)

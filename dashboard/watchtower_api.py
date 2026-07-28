@@ -6,7 +6,25 @@ import tempfile
 import requests as http_requests
 from flask import flash
 
-WATCHTOWER_API_TOKEN = os.environ.get("WATCHTOWER_HTTP_API_TOKEN", "")
+
+def _load_api_token():
+    value = os.environ.get("WATCHTOWER_HTTP_API_TOKEN", "").strip()
+    if value and os.path.isfile(value):
+        try:
+            with open(value, "r", encoding="utf-8") as token_file:
+                value = token_file.read().strip()
+        except OSError as exc:
+            raise RuntimeError("Impossible de lire WATCHTOWER_HTTP_API_TOKEN") from exc
+    if not value:
+        raise RuntimeError("WATCHTOWER_HTTP_API_TOKEN est obligatoire")
+    if len(value) < 32:
+        raise RuntimeError(
+            "WATCHTOWER_HTTP_API_TOKEN doit contenir au moins 32 caracteres"
+        )
+    return value
+
+
+WATCHTOWER_API_TOKEN = _load_api_token()
 WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://localhost:8080")
 CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 METRICS_FILE = os.path.join(CONFIG_DIR, "metrics_history.json")
@@ -14,8 +32,8 @@ METRICS_FILE = os.path.join(CONFIG_DIR, "metrics_history.json")
 METRICS_TO_TRACK = (
     "watchtower_containers_updated",
     "watchtower_scans_total",
-    "watchtower_scans_skipped",
-    "watchtower_scans_failed",
+    "watchtower_scans_skipped_total",
+    "watchtower_containers_failed",
 )
 
 def _load_metrics():
@@ -134,7 +152,13 @@ def get_watchtower_metrics():
 def restart_watchtower():
     try:
         result = subprocess.run(
-            ["supervisorctl", "restart", "watchtower"],
+            [
+                "supervisorctl",
+                "-c",
+                "/etc/supervisor/conf.d/supervisord.conf",
+                "restart",
+                "watchtower",
+            ],
             capture_output=True,
             text=True,
             timeout=30,
@@ -142,7 +166,13 @@ def restart_watchtower():
         if result.returncode == 0:
             time.sleep(2)
             check = subprocess.run(
-                ["supervisorctl", "status", "watchtower"],
+                [
+                    "supervisorctl",
+                    "-c",
+                    "/etc/supervisor/conf.d/supervisord.conf",
+                    "status",
+                    "watchtower",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=10,

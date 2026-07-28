@@ -1,6 +1,8 @@
 import os
 import json
+import re
 import tempfile
+from urllib.parse import urlparse
 
 CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
@@ -53,14 +55,17 @@ def _write_settings(settings):
 
 def save_settings(form):
     errors = []
+    current_settings = load_settings()
 
     try:
-        poll_interval = str(max(60, int(form.get("poll_interval") or 86400)))
+        poll_interval = str(
+            min(604800, max(60, int(form.get("poll_interval") or 86400)))
+        )
     except (ValueError, TypeError):
         poll_interval = "86400"
 
     try:
-        timeout = str(max(10, int(form.get("timeout") or 30)))
+        timeout = str(min(3600, max(10, int(form.get("timeout") or 30))))
     except (ValueError, TypeError):
         timeout = "30"
 
@@ -76,6 +81,23 @@ def save_settings(form):
             errors.append("Le format cron est invalide. Il doit contenir exactement 6 champs. La planification cron a ete desactivee.")
             schedule = ""
 
+    submitted_webhook = form.get("discord_webhook_url", "").strip()
+    if submitted_webhook:
+        parsed_webhook = urlparse(submitted_webhook)
+        valid_hosts = {"discord.com", "discordapp.com"}
+        webhook_parts = parsed_webhook.path.strip("/").split("/")
+        valid_webhook = (
+            parsed_webhook.scheme == "https"
+            and parsed_webhook.hostname in valid_hosts
+            and len(webhook_parts) == 4
+            and webhook_parts[:2] == ["api", "webhooks"]
+            and webhook_parts[2].isdigit()
+            and bool(re.fullmatch(r"[A-Za-z0-9._-]+", webhook_parts[3]))
+        )
+        if not valid_webhook:
+            errors.append("L'URL du webhook Discord est invalide et n'a pas ete modifiee.")
+            submitted_webhook = ""
+
     settings = {
         "poll_interval": poll_interval,
         "schedule": schedule,
@@ -89,7 +111,12 @@ def save_settings(form):
         "no_startup_message": "no_startup_message" in form,
         "timeout": timeout,
         "notifications_discord": "notifications_discord" in form,
-        "discord_webhook_url": form.get("discord_webhook_url", "").strip(),
+        # An empty field keeps the existing secret because it is never rendered
+        # back into the settings page.
+        "discord_webhook_url": (
+            submitted_webhook
+            or current_settings.get("discord_webhook_url", "")
+        ),
     }
 
     _write_settings(settings)

@@ -7,6 +7,7 @@
     Les modifications sont sauvegardees et Watchtower est automatiquement redemarre.
   </p>
   <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
     <div class="form-group">
       <label for="schedule">Planification cron (prioritaire sur l'intervalle)</label>
@@ -85,8 +86,14 @@
     <div class="form-group">
       <label for="discord_webhook_url">URL du Webhook Discord</label>
       <input type="text" id="discord_webhook_url" name="discord_webhook_url"
-             value="{{ settings.discord_webhook_url }}"
-             placeholder="https://discord.com/api/webhooks/XXXXXXX/XXXXXXX">
+             value=""
+             autocomplete="off"
+             placeholder="{{ 'Webhook configure - laisser vide pour le conserver' if settings.discord_webhook_configured else 'https://discord.com/api/webhooks/XXXXXXX/XXXXXXX' }}">
+      {% if settings.discord_webhook_configured %}
+      <div style="font-size:.8rem;color:#8b949e;margin-top:.25rem">
+        Un webhook est configure. Sa valeur est masquee et un champ vide le conserve.
+      </div>
+      {% endif %}
     </div>
 
     <hr style="border-color:#30363d;margin:1.25rem 0">
@@ -96,6 +103,7 @@
 
   <form method="POST" action="{{ url_for('reset_metrics_route') }}" style="margin-top:.75rem"
         onsubmit="return confirm('Etes-vous sur de vouloir remettre les metriques a zero ?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit" class="btn btn-danger">Remise a zero metriques</button>
   </form>
 </div>

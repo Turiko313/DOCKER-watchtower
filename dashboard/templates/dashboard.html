@@ -28,11 +28,11 @@
     <div class="label">Scans total</div>
   </div>
   <div class="metric-card">
-    <div class="value">{{ metrics.get('watchtower_scans_skipped', 0)|int }}</div>
+    <div class="value">{{ metrics.get('watchtower_scans_skipped_total', 0)|int }}</div>
     <div class="label">Scans ignores</div>
   </div>
   {% set failed_count = update_statuses.values()|select('equalto','failed')|list|length %}
-  {% set total_failed = failed_count + metrics.get('watchtower_scans_failed', 0)|int %}
+  {% set total_failed = failed_count + metrics.get('watchtower_containers_failed', 0)|int %}
   {% if total_failed > 0 %}
   <div class="metric-card" style="border-color:#da3633">
     <div class="value" style="color:#f85149">{{ total_failed }}</div>
@@ -46,6 +46,7 @@
   <div style="display:flex;align-items:center;justify-content:space-between">
     <h2>Mise a jour manuelle</h2>
     <form method="POST" action="{{ url_for('trigger_update') }}" id="updateForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="btn btn-primary" id="updateBtn">
         <span id="updateText">Verifier maintenant</span>
         <span id="updateSpinner" class="spinner" style="display:none"></span>
@@ -160,6 +161,8 @@
 </div>
 
 <script>
+const CSRF_TOKEN = {{ csrf_token|tojson }};
+
 function bindEvents() {
   document.querySelectorAll('.group-header').forEach(function(header) {
     if(!header.dataset.open) header.dataset.open = '0';
@@ -251,7 +254,10 @@ if(updateForm) {
     btn.disabled = true;
     btn.style.opacity = '0.7';
 
-    fetch(this.action, { method: 'POST' })
+    fetch(this.action, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': CSRF_TOKEN }
+    })
       .then(function(r) { return r.json(); })
       .then(function(res) {
         alert(res.message);

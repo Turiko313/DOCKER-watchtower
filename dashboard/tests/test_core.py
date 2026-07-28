@@ -9,6 +9,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+os.environ.setdefault(
+    "WATCHTOWER_HTTP_API_TOKEN", "test-watchtower-token-at-least-32-chars"
+)
+os.environ.setdefault("DASHBOARD_USERNAME", "test-user")
+os.environ.setdefault("DASHBOARD_PASSWORD", "test-password")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-with-at-least-32-characters")
+
 import settings
 import watchtower_api
 
@@ -19,11 +26,15 @@ class TestDashboardCore(unittest.TestCase):
 # HELP watchtower_scans_total Total scans
 watchtower_scans_total 12.0
 watchtower_containers_updated 3
+watchtower_scans_skipped_total 2
+watchtower_containers_failed 1
 invalid_metric NaN
 """
         metrics = watchtower_api.parse_prometheus(text)
         self.assertEqual(metrics["watchtower_scans_total"], 12)
         self.assertEqual(metrics["watchtower_containers_updated"], 3)
+        self.assertEqual(metrics["watchtower_scans_skipped_total"], 2)
+        self.assertEqual(metrics["watchtower_containers_failed"], 1)
 
     def test_save_settings_invalid_cron_is_disabled(self):
         with tempfile.TemporaryDirectory() as td:
@@ -39,6 +50,30 @@ invalid_metric NaN
                 self.assertTrue(errors)
                 self.assertEqual(loaded["schedule"], "")
                 self.assertEqual(loaded["poll_interval"], "86400")
+            finally:
+                settings.CONFIG_DIR = old_config_dir
+                settings.SETTINGS_FILE = old_settings_file
+
+    def test_save_settings_does_not_erase_masked_discord_webhook(self):
+        with tempfile.TemporaryDirectory() as td:
+            old_config_dir = settings.CONFIG_DIR
+            old_settings_file = settings.SETTINGS_FILE
+            try:
+                settings.CONFIG_DIR = td
+                settings.SETTINGS_FILE = os.path.join(td, "watchtower.json")
+                settings._write_settings(
+                    {
+                        **settings.DEFAULTS,
+                        "discord_webhook_url": "https://discord.com/api/webhooks/id/token",
+                    }
+                )
+
+                settings.save_settings({"discord_webhook_url": ""})
+
+                self.assertEqual(
+                    settings.load_settings()["discord_webhook_url"],
+                    "https://discord.com/api/webhooks/id/token",
+                )
             finally:
                 settings.CONFIG_DIR = old_config_dir
                 settings.SETTINGS_FILE = old_settings_file

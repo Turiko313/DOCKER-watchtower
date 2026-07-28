@@ -1,0 +1,9 @@
+.env
+.git
+.github
+.vs
+.vscode
+__pycache__
+*.py[cod]
+dashboard/tests
+README.md

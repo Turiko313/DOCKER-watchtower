@@ -3,26 +3,32 @@ services:
     image: ghcr.io/turiko313/watchtower-dashboard:latest
     container_name: watchtower-dashboard
     restart: unless-stopped
+    read_only: true
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - watchtower_config:/config
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - TZ=${TZ:-Europe/Paris}
-      - DOCKER_API_VERSION=1.40
       # Watchtower API
-      - WATCHTOWER_HTTP_API_METRICS=true
-      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_ENDPOINTS=update,metrics
       - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
-      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_API_TOKEN}
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_API_TOKEN:?WATCHTOWER_API_TOKEN obligatoire}
       # Dashboard
-      - DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
-      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
-      - SECRET_KEY=${SECRET_KEY}
+      - DASHBOARD_USERNAME=${DASHBOARD_USERNAME:?DASHBOARD_USERNAME obligatoire}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD obligatoire}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY obligatoire}
+      - CONFIG_DIR=/config
       # GHCR private registry (optional)
       - GHCR_USERNAME=${GHCR_USERNAME:-}
       - GHCR_TOKEN=${GHCR_TOKEN:-}
     ports:
-      - "${DASHBOARD_PORT:-8888}:5000"
+      - "${DASHBOARD_BIND_ADDRESS:-0.0.0.0}:${DASHBOARD_PORT:-8888}:5000"
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
 

@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import sys
+import tempfile
 
 SETTINGS_FILE = "/config/watchtower.json"
 
@@ -86,15 +87,47 @@ os.environ["WATCHTOWER_HTTP_API_PERIODIC_POLLS"] = "true"
 # ---------------------------------------------------------------------------
 ghcr_user = os.environ.get("GHCR_USERNAME", "").strip()
 ghcr_token = os.environ.get("GHCR_TOKEN", "").strip()
+ghcr_token_file = os.environ.get("GHCR_TOKEN_FILE", "").strip()
+
+if ghcr_token_file:
+    try:
+        with open(ghcr_token_file, "r", encoding="utf-8") as token_file:
+            ghcr_token = token_file.read().strip()
+    except OSError as exc:
+        print(
+            f"[start_watchtower] Warning: could not read GHCR_TOKEN_FILE: {exc}",
+            file=sys.stderr,
+        )
 
 if ghcr_user and ghcr_token:
     docker_cfg_dir = "/config/docker-config"
-    os.makedirs(docker_cfg_dir, exist_ok=True)
+    os.makedirs(docker_cfg_dir, mode=0o700, exist_ok=True)
+    os.chmod(docker_cfg_dir, 0o700)
     auth_str = base64.b64encode(f"{ghcr_user}:{ghcr_token}".encode()).decode()
     cfg = {"auths": {"ghcr.io": {"auth": auth_str}}}
-    with open(os.path.join(docker_cfg_dir, "config.json"), "w") as f:
-        json.dump(cfg, f)
+    fd, temporary_file = tempfile.mkstemp(dir=docker_cfg_dir, prefix=".config-")
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as config_file:
+            json.dump(cfg, config_file)
+            config_file.write("\n")
+            config_file.flush()
+            os.fsync(config_file.fileno())
+        os.replace(temporary_file, os.path.join(docker_cfg_dir, "config.json"))
+    except OSError:
+        try:
+            os.unlink(temporary_file)
+        except FileNotFoundError:
+            pass
+        raise
     os.environ["DOCKER_CONFIG"] = docker_cfg_dir
     print("[start_watchtower] GHCR auth configured.", file=sys.stderr)
+elif ghcr_user or ghcr_token:
+    print(
+        "[start_watchtower] Warning: incomplete GHCR credentials; anonymous access will be used.",
+        file=sys.stderr,
+    )
+else:
+    print("[start_watchtower] GHCR anonymous access enabled.", file=sys.stderr)
 
 os.execv("/usr/local/bin/watchtower", ["/usr/local/bin/watchtower"])
