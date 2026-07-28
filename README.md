@@ -36,7 +36,7 @@ Puis renseignez `.env` :
 TZ=Europe/Paris
 WATCHTOWER_API_TOKEN=<premier_secret>
 DASHBOARD_USERNAME=admin
-DASHBOARD_PASSWORD=<mot_de_passe_d_au_moins_12_caracteres>
+DASHBOARD_PASSWORD=<mot_de_passe_d_au_moins_8_caracteres>
 SECRET_KEY=<second_secret>
 DASHBOARD_BIND_ADDRESS=0.0.0.0
 DASHBOARD_PORT=8888
@@ -105,7 +105,7 @@ déclenche la demande d’identifiants HTTP Basic du navigateur.
 |---|---:|---|
 | `WATCHTOWER_API_TOKEN` | oui | Secret d’au moins 32 caractères protégeant l’API Watchtower interne |
 | `DASHBOARD_USERNAME` | oui | Utilisateur HTTP Basic |
-| `DASHBOARD_PASSWORD` | oui | Mot de passe HTTP Basic d’au moins 12 caractères |
+| `DASHBOARD_PASSWORD` | oui | Mot de passe HTTP Basic d’au moins 8 caractères |
 | `SECRET_KEY` | oui | Secret d’au moins 32 caractères utilisé pour Flask et le jeton CSRF |
 | `DASHBOARD_BIND_ADDRESS` | non | Adresse d’écoute publiée (`0.0.0.0` par défaut) |
 | `DASHBOARD_PORT` | non | Port du dashboard (`8888` par défaut) |

@@ -44,8 +44,8 @@ DASHBOARD_USERNAME = _read_required_secret("DASHBOARD_USERNAME")
 DASHBOARD_PASSWORD = _read_required_secret("DASHBOARD_PASSWORD")
 if ":" in DASHBOARD_USERNAME:
     raise RuntimeError("DASHBOARD_USERNAME ne doit pas contenir ':'")
-if len(DASHBOARD_PASSWORD) < 12:
-    raise RuntimeError("DASHBOARD_PASSWORD doit contenir au moins 12 caracteres")
+if len(DASHBOARD_PASSWORD) < 8:
+    raise RuntimeError("DASHBOARD_PASSWORD doit contenir au moins 8 caracteres")
 
 # The token is deterministic across Gunicorn workers, but cannot be guessed
 # without SECRET_KEY. Rotating SECRET_KEY invalidates it immediately.
