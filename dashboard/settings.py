@@ -15,7 +15,6 @@ DEFAULTS = {
     "revive_stopped": False,
     "monitor_only": False,
     "label_enable": False,
-    "rolling_restart": False,
     "log_level": "info",
     "no_startup_message": True,
     "timeout": "30",
@@ -29,6 +28,9 @@ def load_settings():
         with open(SETTINGS_FILE, "r") as fh:
             saved_settings = json.load(fh)
         if isinstance(saved_settings, dict):
+            # Removed from this dashboard because Watchtower v1.20.1 aborts the
+            # update cycle when one monitored dependency is incompatible.
+            saved_settings.pop("rolling_restart", None)
             settings.update(saved_settings)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
@@ -106,7 +108,6 @@ def save_settings(form):
         "revive_stopped": "revive_stopped" in form,
         "monitor_only": "monitor_only" in form,
         "label_enable": "label_enable" in form,
-        "rolling_restart": "rolling_restart" in form,
         "log_level": log_level,
         "no_startup_message": "no_startup_message" in form,
         "timeout": timeout,

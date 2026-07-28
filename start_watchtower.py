@@ -15,9 +15,13 @@ BOOL_SETTINGS = {
     "revive_stopped": "WATCHTOWER_REVIVE_STOPPED",
     "monitor_only": "WATCHTOWER_MONITOR_ONLY",
     "label_enable": "WATCHTOWER_LABEL_ENABLE",
-    "rolling_restart": "WATCHTOWER_ROLLING_RESTART",
     "no_startup_message": "WATCHTOWER_NO_STARTUP_MESSAGE",
 }
+
+# Rolling restarts are intentionally unsupported by this dashboard. Clear a
+# legacy container environment value even when the settings file is absent or
+# invalid, so it cannot abort an update cycle because of container dependencies.
+os.environ.pop("WATCHTOWER_ROLLING_RESTART", None)
 
 try:
     with open(SETTINGS_FILE) as f:

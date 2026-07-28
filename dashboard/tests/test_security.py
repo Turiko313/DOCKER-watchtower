@@ -78,6 +78,7 @@ class TestDashboardSecurity(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"secret-token", response.data)
+        self.assertNotIn(b"rolling_restart", response.data)
 
 
 if __name__ == "__main__":

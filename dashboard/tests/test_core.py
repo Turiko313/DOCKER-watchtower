@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import sys
 import tempfile
@@ -74,6 +75,27 @@ invalid_metric NaN
                     settings.load_settings()["discord_webhook_url"],
                     "https://discord.com/api/webhooks/id/token",
                 )
+            finally:
+                settings.CONFIG_DIR = old_config_dir
+                settings.SETTINGS_FILE = old_settings_file
+
+    def test_legacy_rolling_restart_setting_is_ignored_and_not_saved(self):
+        with tempfile.TemporaryDirectory() as td:
+            old_config_dir = settings.CONFIG_DIR
+            old_settings_file = settings.SETTINGS_FILE
+            try:
+                settings.CONFIG_DIR = td
+                settings.SETTINGS_FILE = os.path.join(td, "watchtower.json")
+                settings._write_settings(
+                    {**settings.DEFAULTS, "rolling_restart": True}
+                )
+
+                self.assertNotIn("rolling_restart", settings.load_settings())
+
+                settings.save_settings({"rolling_restart": "on"})
+                with open(settings.SETTINGS_FILE, encoding="utf-8") as fh:
+                    saved_settings = json.load(fh)
+                self.assertNotIn("rolling_restart", saved_settings)
             finally:
                 settings.CONFIG_DIR = old_config_dir
                 settings.SETTINGS_FILE = old_settings_file

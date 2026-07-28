@@ -122,7 +122,6 @@ La page **Settings** gère :
 - l’inclusion et la réactivation des conteneurs arrêtés ;
 - le mode surveillance uniquement ;
 - la sélection par label ;
-- le redémarrage progressif ;
 - le niveau de journalisation et le timeout ;
 - les notifications Discord.
 
