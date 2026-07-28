@@ -23,7 +23,7 @@ RUN git clone --branch "${WATCHTOWER_VERSION}" --depth 1 \
 # =============================================================
 # Stage 2 - Final image: Python + Watchtower + Dashboard
 # =============================================================
-FROM python:3.12-alpine@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
+FROM python:3.14-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
 
 RUN apk add --no-cache ca-certificates tzdata
 
