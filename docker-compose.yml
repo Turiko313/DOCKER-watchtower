@@ -28,7 +28,7 @@ services:
       - GHCR_USERNAME=${GHCR_USERNAME:-}
       - GHCR_TOKEN=${GHCR_TOKEN:-}
     ports:
-      - "${DASHBOARD_BIND_ADDRESS:-0.0.0.0}:${DASHBOARD_PORT:-8888}:5000"
+      - "${DASHBOARD_BIND_ADDRESS:-127.0.0.1}:${DASHBOARD_PORT:-8888}:5000"
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
 

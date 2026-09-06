@@ -2,7 +2,7 @@
 
 Image tout-en-un pour mettre à jour des conteneurs Docker avec :
 
-- le fork maintenu **[nicholas-fedor/watchtower](https://github.com/nicholas-fedor/watchtower)**, figé en version `v1.20.1` ;
+- le fork maintenu **[nicholas-fedor/watchtower](https://github.com/nicholas-fedor/watchtower)**, figé en version `v1.22.0` ;
 - un dashboard Flask/Gunicorn pour consulter les conteneurs, les métriques et déclencher une vérification ;
 - une page de paramètres persistée dans un volume Docker ;
 - des notifications Discord via Shoutrrr ;
@@ -11,7 +11,7 @@ Image tout-en-un pour mettre à jour des conteneurs Docker avec :
 
 L’ancien projet `containrrr/watchtower` est archivé. Cette image compile le fork
 maintenu depuis son commit immuable
-`56afbbefa18f8c1fa215079588f9e487b3e2e746`.
+`a5bb3cf3ba7ce0d88f39f6017232765dc7c58f6b`.
 
 ## Installation
 
@@ -38,7 +38,7 @@ WATCHTOWER_API_TOKEN=<premier_secret>
 DASHBOARD_USERNAME=admin
 DASHBOARD_PASSWORD=<mot_de_passe_d_au_moins_8_caracteres>
 SECRET_KEY=<second_secret>
-DASHBOARD_BIND_ADDRESS=0.0.0.0
+DASHBOARD_BIND_ADDRESS=127.0.0.1
 DASHBOARD_PORT=8888
 GHCR_USERNAME=
 GHCR_TOKEN=
@@ -71,11 +71,16 @@ docker build --pull \
 docker compose up -d
 ```
 
-Le dashboard est disponible sur :
+Par défaut, le dashboard est disponible uniquement depuis l'hôte Docker :
 
 ```text
-http://<IP_DU_NAS>:8888
+http://127.0.0.1:8888
 ```
+
+Pour un accès distant, publiez-le derrière un reverse proxy HTTPS ou utilisez
+un VPN. Une écoute directe sur le LAN peut être activée explicitement avec
+`DASHBOARD_BIND_ADDRESS=0.0.0.0`, mais HTTP Basic ne chiffre pas les
+identifiants.
 
 Le navigateur affiche directement la boîte de dialogue HTTP Basic. Il n’existe
 plus de page de connexion, de cookie persistant ou de bouton de déconnexion.
@@ -107,7 +112,7 @@ déclenche la demande d’identifiants HTTP Basic du navigateur.
 | `DASHBOARD_USERNAME` | oui | Utilisateur HTTP Basic |
 | `DASHBOARD_PASSWORD` | oui | Mot de passe HTTP Basic d’au moins 8 caractères |
 | `SECRET_KEY` | oui | Secret d’au moins 32 caractères utilisé pour Flask et le jeton CSRF |
-| `DASHBOARD_BIND_ADDRESS` | non | Adresse d’écoute publiée (`0.0.0.0` par défaut) |
+| `DASHBOARD_BIND_ADDRESS` | non | Adresse d’écoute publiée (`127.0.0.1` par défaut) |
 | `DASHBOARD_PORT` | non | Port du dashboard (`8888` par défaut) |
 | `TZ` | non | Fuseau horaire (`Europe/Paris` par défaut) |
 | `GHCR_USERNAME` | non | Compte GitHub pour un package GHCR privé |
@@ -123,10 +128,54 @@ La page **Settings** gère :
 - le mode surveillance uniquement ;
 - la sélection par label ;
 - le niveau de journalisation et le timeout ;
-- les notifications Discord.
+- les notifications Discord ;
+- les commandes OCC exécutées après une mise à jour de Nextcloud.
 
 Le webhook Discord sauvegardé n’est jamais renvoyé au navigateur. Un champ vide
 le conserve. Pour le remplacer, saisissez une nouvelle URL HTTPS Discord valide.
+
+## Commandes post-mise-à-jour Nextcloud
+
+La page **Settings** permet d'activer un worker dédié qui détecte un changement
+réel de l'ID d'image du conteneur nommé exactement `nextcloud`. La première image
+observée initialise seulement la référence. À chaque changement d'image, le worker
+attend que le conteneur soit démarré (et sain si un healthcheck existe), puis vérifie
+avec `occ status --output=json` que Nextcloud est installé, hors maintenance et
+sans migration de base de données en attente. Il réessaie cette vérification pendant
+environ dix minutes avant d'abandonner si Nextcloud reste indisponible.
+Il exécute ensuite les lignes dans l'ordre, avec une seule tentative par changement
+d'image détecté. Un redémarrage avec la même image ne relance pas les commandes.
+Cela fonctionne aussi après un remplacement manuel de l'image, indépendamment
+de Watchtower. Une mise à jour interne sans changement d'image n'est pas détectée.
+
+Exemple recommandé pour l'image Nextcloud officielle :
+
+```text
+docker exec --user www-data nextcloud php occ db:add-missing-indices
+docker exec --user www-data nextcloud php occ db:add-missing-columns
+docker exec --user www-data nextcloud php occ maintenance:repair --include-expensive
+```
+
+Les formes courtes comme `docker exec -it nextcloud occ ...` sont aussi
+acceptées; `-i` et `-t` sont ignorés car le worker n'utilise pas de terminal.
+Pour éviter de transformer le dashboard en shell distant :
+
+- la cible est verrouillée sur `nextcloud` ;
+- seuls `occ`, `php occ` et les utilisateurs `www-data`, `33` ou `82` sont acceptés ;
+- les pipes, redirections, substitutions shell et autres options Docker sont refusés ;
+- l'exécution passe directement par l'API Docker, sans shell ;
+- un maximum de 20 commandes et 8 192 caractères est accepté ;
+- la suite s'arrête au premier code de sortie non nul.
+
+Les statuts de réussite ou d'échec sont visibles dans les journaux de
+`watchtower-dashboard` avec le préfixe `nextcloud-post-update`; la sortie détaillée
+des commandes n'est pas conservée. En cas d'échec, corrigez puis exécutez si nécessaire
+la commande manuellement en SSH. Une tentative échouée ou interrompue n'est pas
+reprise automatiquement sur la même image, pour éviter les doubles exécutions.
+
+Ces exemples effectuent des réparations de la base de données et de la maintenance
+Nextcloud; ils n'installent pas des paquets système. Les commandes `apt`, `apk`,
+les scripts shell et les autres conteneurs ne sont pas acceptés dans ce champ.
 
 ## Sécurité
 
@@ -138,6 +187,7 @@ Le déploiement applique notamment :
 - secrets faibles ou absents refusés au démarrage ;
 - dépendances Python verrouillées avec leurs empreintes SHA-256 ;
 - source Watchtower figée sur une version et un commit précis ;
+- GitHub Actions figées sur les SHA de leurs releases ;
 - système de fichiers du conteneur en lecture seule, `/tmp` en `tmpfs` ;
 - toutes les capabilities Linux supprimées et `no-new-privileges` activé ;
 - fichier d’authentification GHCR créé atomiquement avec le mode `0600` ;
@@ -149,10 +199,11 @@ l’utiliser peut contrôler l’hôte Docker. Le montage `:ro` protège le fich
 socket, mais ne rend pas l’API Docker en lecture seule. N’exposez donc pas le
 dashboard directement sur Internet.
 
-HTTP Basic n’assure pas le chiffrement. Pour un accès hors d’un LAN de confiance,
-placez le dashboard derrière un reverse proxy HTTPS ou un VPN.
+HTTP Basic n’assure pas le chiffrement. Le port est donc lié à `127.0.0.1` par
+défaut. Pour tout accès distant, placez le dashboard derrière un reverse proxy
+HTTPS ou un VPN.
 
-Pour limiter l’exposition au seul hôte :
+La valeur sécurisée par défaut est :
 
 ```env
 DASHBOARD_BIND_ADDRESS=127.0.0.1

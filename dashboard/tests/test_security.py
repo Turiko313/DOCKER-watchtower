@@ -80,6 +80,18 @@ class TestDashboardSecurity(unittest.TestCase):
         self.assertNotIn(b"secret-token", response.data)
         self.assertNotIn(b"rolling_restart", response.data)
 
+    @patch.object(dashboard_app, "load_settings")
+    def test_nextcloud_commands_are_escaped_in_settings(self, load_settings):
+        load_settings.return_value = {
+            **__import__("settings").DEFAULTS,
+            "nextcloud_post_update_commands": '</textarea><script>alert("x")</script>',
+        }
+        response = self.client.get("/settings", headers=_basic_auth())
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'name="nextcloud_post_update_enabled"', response.data)
+        self.assertIn(b'&lt;/textarea&gt;&lt;script&gt;', response.data)
+        self.assertNotIn(b'</textarea><script>', response.data)
+
 
 if __name__ == "__main__":
     unittest.main()

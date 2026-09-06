@@ -117,21 +117,13 @@ class TestUpdateStatuses(unittest.TestCase):
             {"nextcloud": "failed"},
         )
 
-    def test_keeps_legacy_log_compatibility(self):
-        logs = "\n".join(
-            [
-                "Creating /file-renamer",
-                'Unable to update container "/nextcloud": denied',
-            ]
+    def test_ignores_gunicorn_access_log_content(self):
+        logs = (
+            '198.51.100.4 - - [02/Sep/2026:12:00:00 +0200] '
+            '"GET / HTTP/1.1" 401 24 "-" "probe Creating /nextcloud"'
         )
 
-        self.assertEqual(
-            docker_helpers._parse_update_statuses(logs),
-            {
-                "file-renamer": "updated",
-                "nextcloud": "failed",
-            },
-        )
+        self.assertEqual(docker_helpers._parse_update_statuses(logs), {})
 
 
 if __name__ == "__main__":

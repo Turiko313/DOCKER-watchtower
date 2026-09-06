@@ -4,6 +4,8 @@ import re
 import tempfile
 from urllib.parse import urlparse
 
+from nextcloud_hooks import parse_nextcloud_commands
+
 CONFIG_DIR = os.environ.get("CONFIG_DIR", "/config")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "watchtower.json")
 
@@ -20,6 +22,8 @@ DEFAULTS = {
     "timeout": "30",
     "notifications_discord": False,
     "discord_webhook_url": "",
+    "nextcloud_post_update_enabled": False,
+    "nextcloud_post_update_commands": "",
 }
 
 def load_settings():
@@ -28,8 +32,8 @@ def load_settings():
         with open(SETTINGS_FILE, "r") as fh:
             saved_settings = json.load(fh)
         if isinstance(saved_settings, dict):
-            # Removed from this dashboard because Watchtower v1.20.1 aborts the
-            # update cycle when one monitored dependency is incompatible.
+            # Removed because rolling restarts can abort a complete update cycle
+            # when one monitored dependency is incompatible.
             saved_settings.pop("rolling_restart", None)
             settings.update(saved_settings)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -100,6 +104,23 @@ def save_settings(form):
             errors.append("L'URL du webhook Discord est invalide et n'a pas ete modifiee.")
             submitted_webhook = ""
 
+    nextcloud_commands = form.get("nextcloud_post_update_commands", "").strip()
+    nextcloud_enabled = "nextcloud_post_update_enabled" in form
+    try:
+        parsed_nextcloud_commands = parse_nextcloud_commands(nextcloud_commands)
+    except ValueError as exc:
+        errors.append(f"Commandes post-mise-a-jour Nextcloud invalides: {exc}")
+        nextcloud_commands = current_settings.get(
+            "nextcloud_post_update_commands", ""
+        )
+        nextcloud_enabled = False
+        parsed_nextcloud_commands = []
+    if nextcloud_enabled and not parsed_nextcloud_commands:
+        errors.append(
+            "Le hook Nextcloud a ete desactive car aucune commande OCC valide n'est configuree."
+        )
+        nextcloud_enabled = False
+
     settings = {
         "poll_interval": poll_interval,
         "schedule": schedule,
@@ -118,6 +139,8 @@ def save_settings(form):
             submitted_webhook
             or current_settings.get("discord_webhook_url", "")
         ),
+        "nextcloud_post_update_enabled": nextcloud_enabled,
+        "nextcloud_post_update_commands": nextcloud_commands,
     }
 
     _write_settings(settings)

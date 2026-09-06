@@ -112,7 +112,7 @@ def _watchtower_container(client):
 
 
 def _log_fields(line):
-    """Parse Logrus logfmt fields while tolerating Supervisor prefixes."""
+    """Parse Watchtower logfmt fields while tolerating Supervisor prefixes."""
     fields = {}
     try:
         tokens = shlex.split(_ANSI_ESCAPE_RE.sub("", line), posix=True)
@@ -132,7 +132,7 @@ def _container_field(fields):
 
 
 def _parse_update_statuses(log_text):
-    """Extract per-container outcomes from legacy and v1.20+ Watchtower logs."""
+    """Extract per-container outcomes from structured Watchtower logs."""
     statuses = {}
     pending_updates = set()
     failed_in_session = set()
@@ -140,19 +140,6 @@ def _parse_update_statuses(log_text):
     for raw_line in log_text.splitlines():
         line = _ANSI_ESCAPE_RE.sub("", raw_line).strip()
         if not line:
-            continue
-
-        # Legacy containrrr/watchtower messages.
-        legacy_update = re.search(r'Creating /([^\s"]+)', line)
-        if legacy_update:
-            statuses[legacy_update.group(1).strip()] = "updated"
-            continue
-        if "Unable to update container" in line:
-            legacy_failure = re.search(
-                r'Unable to update container.*?/([^\s"\\]+)', line
-            )
-            if legacy_failure:
-                statuses[legacy_failure.group(1).strip()] = "failed"
             continue
 
         fields = _log_fields(line)

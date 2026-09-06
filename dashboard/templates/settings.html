@@ -93,6 +93,29 @@
 
     <hr style="border-color:#30363d;margin:1.25rem 0">
 
+    <h3 style="margin-bottom:.75rem">Apres une mise a jour Nextcloud</h3>
+
+    <div class="checkbox-group">
+      <input type="checkbox" id="nextcloud_post_update_enabled" name="nextcloud_post_update_enabled"
+             {{ 'checked' if settings.nextcloud_post_update_enabled }}>
+      <label for="nextcloud_post_update_enabled">Executer les commandes OCC apres le demarrage d'une nouvelle image Nextcloud</label>
+    </div>
+
+    <div class="form-group">
+      <label for="nextcloud_post_update_commands">Commandes (une par ligne)</label>
+      <textarea id="nextcloud_post_update_commands" name="nextcloud_post_update_commands"
+                maxlength="8192" spellcheck="false"
+                placeholder="docker exec --user www-data nextcloud php occ db:add-missing-indices&#10;docker exec --user www-data nextcloud php occ db:add-missing-columns&#10;docker exec --user www-data nextcloud php occ maintenance:repair --include-expensive">{{ settings.nextcloud_post_update_commands }}</textarea>
+      <div style="font-size:.8rem;color:#8b949e;margin-top:.25rem">
+        Le conteneur doit s'appeler <code>nextcloud</code>. Seules les commandes <code>occ</code> ou
+        <code>php occ</code> sont acceptees; <code>-it</code> est tolere mais ignore. Elles sont executees
+        apres verification de l'etat Nextcloud, dans l'ordre, sans shell, avec une tentative par changement
+        d'image. La suite s'arrete au premier echec. Un redemarrage avec la meme image ne les relance pas.
+      </div>
+    </div>
+
+    <hr style="border-color:#30363d;margin:1.25rem 0">
+
     <button type="submit" class="btn btn-primary">Sauvegarder et redemarrer</button>
   </form>
 

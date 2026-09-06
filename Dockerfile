@@ -1,10 +1,10 @@
 # =============================================================
 # Stage 1 - Build the maintained Watchtower fork from an immutable commit
 # =============================================================
-FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS builder
+FROM golang:1.27.1-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS builder
 
-ARG WATCHTOWER_VERSION=v1.20.1
-ARG WATCHTOWER_COMMIT=56afbbefa18f8c1fa215079588f9e487b3e2e746
+ARG WATCHTOWER_VERSION=v1.22.0
+ARG WATCHTOWER_COMMIT=a5bb3cf3ba7ce0d88f39f6017232765dc7c58f6b
 
 RUN apk add --no-cache ca-certificates git
 
@@ -23,7 +23,7 @@ RUN git clone --branch "${WATCHTOWER_VERSION}" --depth 1 \
 # =============================================================
 # Stage 2 - Final image: Python + Watchtower + Dashboard
 # =============================================================
-FROM python:3.12-alpine@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
+FROM python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
 
 RUN apk add --no-cache ca-certificates tzdata
 
@@ -44,6 +44,8 @@ RUN pip install --require-hashes -r requirements.txt
 # Dashboard code - copy each file explicitly
 COPY dashboard/app.py ./app.py
 COPY dashboard/docker_helpers.py ./docker_helpers.py
+COPY dashboard/nextcloud_hooks.py ./nextcloud_hooks.py
+COPY dashboard/nextcloud_post_update.py ./nextcloud_post_update.py
 COPY dashboard/settings.py ./settings.py
 COPY dashboard/watchtower_api.py ./watchtower_api.py
 COPY dashboard/templates/ ./templates/
@@ -55,13 +57,14 @@ RUN chmod +x /usr/local/bin/start_watchtower.py
 
 LABEL org.opencontainers.image.source="https://github.com/Turiko313/DOCKER-watchtower" \
       org.opencontainers.image.description="Maintained Watchtower fork + secured dashboard" \
-      org.opencontainers.image.version="1.20.1"
+      org.opencontainers.image.version="1.1.0"
 
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD supervisorctl -c /etc/supervisor/conf.d/supervisord.conf status watchtower | grep -q RUNNING \
         && supervisorctl -c /etc/supervisor/conf.d/supervisord.conf status dashboard | grep -q RUNNING \
+        && supervisorctl -c /etc/supervisor/conf.d/supervisord.conf status nextcloud-post-update | grep -q RUNNING \
         || exit 1
 
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
