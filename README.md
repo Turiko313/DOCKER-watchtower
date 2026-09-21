@@ -2,7 +2,7 @@
 
 Image tout-en-un pour mettre à jour des conteneurs Docker avec :
 
-- le fork maintenu **[nicholas-fedor/watchtower](https://github.com/nicholas-fedor/watchtower)**, figé en version `v1.22.0` ;
+- le fork maintenu **[nicholas-fedor/watchtower](https://github.com/nicholas-fedor/watchtower)**, figé en version `v1.22.2` ;
 - un dashboard Flask/Gunicorn pour consulter les conteneurs, les métriques et déclencher une vérification ;
 - une page de paramètres persistée dans un volume Docker ;
 - des notifications Discord via Shoutrrr ;
@@ -11,7 +11,7 @@ Image tout-en-un pour mettre à jour des conteneurs Docker avec :
 
 L’ancien projet `containrrr/watchtower` est archivé. Cette image compile le fork
 maintenu depuis son commit immuable
-`a5bb3cf3ba7ce0d88f39f6017232765dc7c58f6b`.
+`32ad1ae001ab41bef94bbed3827e6caca4df01c7`.
 
 ## Installation
 
@@ -172,6 +172,18 @@ Les statuts de réussite ou d'échec sont visibles dans les journaux de
 des commandes n'est pas conservée. En cas d'échec, corrigez puis exécutez si nécessaire
 la commande manuellement en SSH. Une tentative échouée ou interrompue n'est pas
 reprise automatiquement sur la même image, pour éviter les doubles exécutions.
+
+Si les notifications Discord sont activées et le webhook renseigné, le worker
+envoie un **message complémentaire distinct du rapport Watchtower** à la fin de
+la tentative : **Complément Nextcloud OK** si toutes les commandes réussissent,
+ou **Complément Nextcloud NOK** en cas d'échec. Chaque commande est identifiée
+par son numéro et son action OCC, avec `OK`, `NOK` (code de sortie si disponible)
+ou `non exécutée` si une commande précédente a échoué. Les arguments et sorties
+des commandes ne sont pas envoyés. Une configuration invalide ou un Nextcloud
+indisponible produit également un NOK avec la raison de l'annulation.
+Aucun complément n'est envoyé si le hook est désactivé, lors de l'initialisation
+ou si l'image ne change pas. Un échec d'envoi Discord est journalisé, sans
+relancer les commandes ni réessayer automatiquement l'envoi.
 
 Ces exemples effectuent des réparations de la base de données et de la maintenance
 Nextcloud; ils n'installent pas des paquets système. Les commandes `apt`, `apk`,

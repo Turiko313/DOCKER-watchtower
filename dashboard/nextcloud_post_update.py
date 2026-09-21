@@ -5,10 +5,12 @@ import json
 import logging
 import os
 from pathlib import PurePosixPath
+import re
 import tempfile
 import time
 
 import docker
+import requests
 from docker.errors import DockerException, NotFound
 
 from nextcloud_hooks import NEXTCLOUD_CONTAINER_NAME, parse_nextcloud_commands
@@ -127,11 +129,52 @@ def _wait_until_ready(client, image_id, command, sleep_fn=time.sleep):
         sleep_fn(5)
 
 
-def _run_commands(container, commands):
+def _command_label(command):
+    # Show the OCC action, never arguments that may contain credentials.
+    index = 2 if str(PurePosixPath(command.argv[0])) == "php" else 1
+    return re.sub(r"[^A-Za-z0-9:_-]", "?", command.argv[index])[:40]
+
+
+def _notify_discord(settings, result, lines):
+    if not settings.get("notifications_discord"):
+        return
+    url = settings.get("discord_webhook_url", "").strip()
+    if not url:
+        return
+    # Recheck persisted configuration and never follow a webhook redirect.
+    if not re.fullmatch(
+        r"https://(?:discord\.com|discordapp\.com)/api/webhooks/[0-9]+/[A-Za-z0-9._-]+/?",
+        url,
+    ):
+        logger.warning("Notification Discord ignoree: URL de webhook invalide.")
+        return
+    status = "OK" if result == "success" else "NOK"
+    content = "\n".join([f"Complément Nextcloud {status}", *lines])
+    try:
+        with requests.post(
+            url,
+            params={"wait": "true"},
+            json={"content": content, "allowed_mentions": {"parse": []}},
+            timeout=15,
+            allow_redirects=False,
+        ) as response:
+            if not 200 <= response.status_code < 300:
+                logger.warning("Notification Discord non envoyee (HTTP %s).", response.status_code)
+    except requests.RequestException:
+        # Request exceptions can include the secret webhook URL.
+        logger.warning("Notification Discord non envoyee: erreur reseau.")
+
+
+def _run_commands(container, commands, results=None):
+    if results is None:
+        results = []
     for index, command in enumerate(commands, start=1):
         logger.info("Execution de la commande OCC %s/%s.", index, len(commands))
+        label = f"{index}. {_command_label(command)}"
+        results.append(f"{label} : NOK (exécution interrompue)")
         exit_code, _ = _exec_occ(container, command.argv, command.user)
         if exit_code != 0:
+            results[-1] = f"{label} : NOK (code {exit_code})"
             logger.error(
                 "La commande OCC %s/%s a echoue avec le code %s; la suite est annulee.",
                 index,
@@ -139,7 +182,39 @@ def _run_commands(container, commands):
                 exit_code,
             )
             return False
+        results[-1] = f"{label} : OK"
     return True
+
+
+def _execute_hook(client, image_id, settings, sleep_fn):
+    try:
+        commands = parse_nextcloud_commands(
+            settings.get("nextcloud_post_update_commands", "")
+        )
+    except ValueError:
+        logger.error("Configuration du hook Nextcloud invalide.")
+        return "invalid", ["Configuration des commandes OCC invalide; aucune commande exécutée."]
+    if not commands:
+        logger.error("Hook Nextcloud active sans commande.")
+        return "invalid", ["Aucune commande OCC configurée."]
+
+    lines = []
+    try:
+        container = _wait_until_ready(client, image_id, commands[0], sleep_fn=sleep_fn)
+        if container is None:
+            logger.error("Nextcloud n'est pas devenu pret; commandes annulees.")
+            return "not-ready", ["Nextcloud indisponible ou image remplacée; aucune commande exécutée."]
+        success = _run_commands(container, commands, results=lines)
+    except (DockerException, requests.RequestException):
+        logger.warning("Execution du hook Nextcloud interrompue: erreur Docker ou reseau.")
+        success = False
+        if not lines:
+            return "failed", ["Erreur Docker ou réseau; aucune commande exécutée."]
+    for index in range(len(lines), len(commands)):
+        lines.append(f"{index + 1}. {_command_label(commands[index])} : non exécutée")
+    if success:
+        logger.info("Toutes les commandes OCC post-mise-a-jour ont reussi.")
+    return ("success" if success else "failed"), lines
 
 
 def process_once(client, sleep_fn=time.sleep):
@@ -173,26 +248,9 @@ def process_once(client, sleep_fn=time.sleep):
         logger.info("Hook Nextcloud desactive; aucune commande executee.")
         return "disabled"
 
-    try:
-        commands = parse_nextcloud_commands(
-            settings.get("nextcloud_post_update_commands", "")
-        )
-    except ValueError as exc:
-        logger.error("Configuration du hook Nextcloud invalide: %s", exc)
-        return "invalid"
-    if not commands:
-        logger.error("Hook Nextcloud active sans commande.")
-        return "invalid"
-
-    container = _wait_until_ready(client, image_id, commands[0], sleep_fn=sleep_fn)
-    if container is None:
-        logger.error("Nextcloud n'est pas devenu pret; commandes annulees.")
-        return "not-ready"
-
-    if _run_commands(container, commands):
-        logger.info("Toutes les commandes OCC post-mise-a-jour ont reussi.")
-        return "success"
-    return "failed"
+    result, lines = _execute_hook(client, image_id, settings, sleep_fn)
+    _notify_discord(settings, result, lines)
+    return result
 
 
 def main():

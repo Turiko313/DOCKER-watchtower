@@ -314,5 +314,144 @@ class TestNextcloudPostUpdateWorker(unittest.TestCase):
         self.assertEqual(len(output), 1024)
 
 
+class TestNextcloudDiscordNotifications(unittest.TestCase):
+    def setUp(self):
+        self.settings = {
+            "nextcloud_post_update_enabled": True,
+            "nextcloud_post_update_commands": "\n".join([
+                "docker exec nextcloud php occ db:add-missing-indices",
+                "docker exec nextcloud php occ db:add-missing-columns",
+                "docker exec nextcloud php occ maintenance:repair --include-expensive",
+            ]),
+            "notifications_discord": True,
+            "discord_webhook_url": "https://discord.com/api/webhooks/123/test-token",
+        }
+        self.post = self.enterContext(patch.object(nextcloud_post_update.requests, "post"))
+        self.post.return_value.__enter__.return_value.status_code = 200
+
+    def run_hook(self, container=None, baseline="sha256:old"):
+        container = container or _FakeContainer()
+        client = _FakeClient(container)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            nextcloud_post_update, "STATE_FILE", os.path.join(directory, "state.json")
+        ), patch.object(nextcloud_post_update, "load_settings", return_value=self.settings):
+            if baseline:
+                nextcloud_post_update._save_state({"image_id": baseline})
+            result = nextcloud_post_update.process_once(client, sleep_fn=lambda _: None)
+            self.assertEqual(nextcloud_post_update.process_once(client), "unchanged")
+        return result, container
+
+    def content(self):
+        self.post.assert_called_once()
+        return self.post.call_args.kwargs["json"]["content"]
+
+    def test_success_reports_each_command_once(self):
+        result, container = self.run_hook()
+        self.assertEqual(result, "success")
+        self.assertEqual(len(container.exec_calls), 3)
+        self.assertEqual(self.content(), "\n".join([
+            "Complément Nextcloud OK",
+            "1. db:add-missing-indices : OK",
+            "2. db:add-missing-columns : OK",
+            "3. maintenance:repair : OK",
+        ]))
+        self.assertEqual(self.post.call_args.args, (self.settings["discord_webhook_url"],))
+        self.assertEqual(self.post.call_args.kwargs["json"]["allowed_mentions"], {"parse": []})
+        self.assertEqual(self.post.call_args.kwargs["params"], {"wait": "true"})
+        self.assertEqual(self.post.call_args.kwargs["timeout"], 15)
+        self.assertFalse(self.post.call_args.kwargs["allow_redirects"])
+
+    def test_failure_reports_success_failed_and_skipped_commands(self):
+        result, container = self.run_hook(_FakeContainer(exit_codes=[0, 7]))
+        self.assertEqual(result, "failed")
+        self.assertEqual(len(container.exec_calls), 2)
+        self.assertEqual(self.content(), "\n".join([
+            "Complément Nextcloud NOK",
+            "1. db:add-missing-indices : OK",
+            "2. db:add-missing-columns : NOK (code 7)",
+            "3. maintenance:repair : non exécutée",
+        ]))
+
+    def test_not_ready_and_invalid_configuration_report_nok(self):
+        with patch.object(nextcloud_post_update, "_wait_until_ready", return_value=None):
+            result, container = self.run_hook()
+        self.assertEqual(result, "not-ready")
+        self.assertEqual(container.exec_calls, [])
+        self.assertIn("Complément Nextcloud NOK", self.content())
+        self.assertIn("aucune commande exécutée", self.content())
+        for commands in ("docker exec database sh", ""):
+            with self.subTest(commands=commands):
+                self.post.reset_mock()
+                self.settings["nextcloud_post_update_commands"] = commands
+                result, container = self.run_hook()
+                self.assertEqual(result, "invalid")
+                self.assertEqual(container.exec_calls, [])
+                self.assertIn("Complément Nextcloud NOK", self.content())
+
+    def test_docker_failure_reports_interrupted_command(self):
+        original = nextcloud_post_update._exec_occ
+
+        def fail_command(container, argv, user, capture_limit=0):
+            if argv[-2:] == ("status", "--output=json"):
+                return original(container, argv, user, capture_limit)
+            raise nextcloud_post_update.DockerException("connection lost")
+
+        with patch.object(nextcloud_post_update, "_exec_occ", side_effect=fail_command):
+            result, _ = self.run_hook()
+        self.assertEqual(result, "failed")
+        self.assertIn("1. db:add-missing-indices : NOK (exécution interrompue)", self.content())
+        self.assertIn("2. db:add-missing-columns : non exécutée", self.content())
+
+    def test_notifications_disabled_or_missing_webhook_do_not_send(self):
+        for key, value in (("notifications_discord", False), ("discord_webhook_url", "")):
+            with self.subTest(key=key), patch.dict(self.settings, {key: value}):
+                result, container = self.run_hook()
+                self.assertEqual(result, "success")
+                self.assertEqual(len(container.exec_calls), 3)
+                self.post.assert_not_called()
+
+    def test_disabled_hook_and_initial_baseline_do_not_send(self):
+        self.assertEqual(self.run_hook(baseline=None)[0], "initialized")
+        self.settings["nextcloud_post_update_enabled"] = False
+        self.assertEqual(self.run_hook()[0], "disabled")
+        self.post.assert_not_called()
+
+    def test_network_failure_does_not_change_result_or_repeat_commands_or_leak_token(self):
+        self.post.side_effect = nextcloud_post_update.requests.Timeout(
+            self.settings["discord_webhook_url"]
+        )
+        with self.assertLogs(nextcloud_post_update.logger, level="WARNING") as logs:
+            result, container = self.run_hook()
+        self.assertEqual(result, "success")
+        self.assertEqual(len(container.exec_calls), 3)
+        self.post.assert_called_once()
+        self.assertNotIn("test-token", "\n".join(logs.output))
+
+    def test_http_error_does_not_change_hook_result(self):
+        self.post.return_value.__enter__.return_value.status_code = 429
+        with self.assertLogs(nextcloud_post_update.logger, level="WARNING") as logs:
+            result, _ = self.run_hook()
+        self.assertEqual(result, "success")
+        self.post.assert_called_once()
+        self.assertIn("HTTP 429", "\n".join(logs.output))
+
+    def test_invalid_webhook_does_not_send(self):
+        self.settings["discord_webhook_url"] = "https://example.com/api/webhooks/123/token"
+        with self.assertLogs(nextcloud_post_update.logger, level="WARNING"):
+            self.run_hook()
+        self.post.assert_not_called()
+
+    def test_maximum_commands_fit_discord_limit_and_omit_arguments(self):
+        action = "a" * 100
+        self.settings["nextcloud_post_update_commands"] = "\n".join(
+            f"docker exec nextcloud php occ {action} --password=secret" for _ in range(20)
+        )
+        self.run_hook(_FakeContainer(exit_codes=[7]))
+        content = self.content()
+        self.assertLessEqual(len(content), 2000)
+        self.assertEqual(len(content.splitlines()), 21)
+        self.assertNotIn("secret", content)
+
+
 if __name__ == "__main__":
     unittest.main()
