@@ -137,23 +137,27 @@ le conserve. Pour le remplacer, saisissez une nouvelle URL HTTPS Discord valide.
 ## Commandes post-mise-à-jour Nextcloud
 
 La page **Settings** permet d'activer un worker dédié qui détecte un changement
-réel de l'ID d'image du conteneur nommé exactement `nextcloud`. La première image
-observée initialise seulement la référence. À chaque changement d'image, le worker
-attend que le conteneur soit démarré (et sain si un healthcheck existe), puis vérifie
-avec `occ status --output=json` que Nextcloud est installé, hors maintenance et
-sans migration de base de données en attente. Il réessaie cette vérification pendant
+réel de l'ID d'image du conteneur nommé exactement `nextcloud`, même si son tag
+reste identique. La première image observée initialise seulement la référence.
+À chaque changement d'image, le worker enregistre la nouvelle référence dans le
+volume de configuration et attend environ deux minutes, même après un redémarrage
+du worker. Il attend ensuite que le conteneur soit démarré (et sain si un healthcheck
+existe), puis vérifie avec `occ status --output=json` que Nextcloud est installé,
+hors maintenance et sans migration de base de données en attente. Il réessaie pendant
 environ dix minutes avant d'abandonner si Nextcloud reste indisponible.
 Il exécute ensuite les lignes dans l'ordre, avec une seule tentative par changement
-d'image détecté. Un redémarrage avec la même image ne relance pas les commandes.
+d'image détecté. Si le hook est désactivé, la nouvelle image reste en attente jusqu'à
+son activation. Un redémarrage avec la même image ne relance pas les commandes déjà
+tentées.
 Cela fonctionne aussi après un remplacement manuel de l'image, indépendamment
 de Watchtower. Une mise à jour interne sans changement d'image n'est pas détectée.
 
 Exemple recommandé pour l'image Nextcloud officielle :
 
 ```text
-docker exec --user www-data nextcloud php occ db:add-missing-indices
 docker exec --user www-data nextcloud php occ db:add-missing-columns
-docker exec --user www-data nextcloud php occ maintenance:repair --include-expensive
+docker exec --user www-data nextcloud php occ db:add-missing-indices
+docker exec --user www-data nextcloud php occ db:add-missing-primary-keys
 ```
 
 Les formes courtes comme `docker exec -it nextcloud occ ...` sont aussi
@@ -185,8 +189,10 @@ Aucun complément n'est envoyé si le hook est désactivé, lors de l'initialisa
 ou si l'image ne change pas. Un échec d'envoi Discord est journalisé, sans
 relancer les commandes ni réessayer automatiquement l'envoi.
 
-Ces exemples effectuent des réparations de la base de données et de la maintenance
-Nextcloud; ils n'installent pas des paquets système. Les commandes `apt`, `apk`,
+Ces commandes appliquent les changements de schéma recommandés par Nextcloud après
+une mise à niveau. `maintenance:repair --include-expensive` peut durer longtemps :
+vérifiez les alertes d'administration et lancez-la séparément si nécessaire.
+Le hook n'installe pas de paquets système. Les commandes `apt`, `apk`,
 les scripts shell et les autres conteneurs ne sont pas acceptés dans ce champ.
 
 ## Sécurité

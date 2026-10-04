@@ -174,8 +174,14 @@ class TestNextcloudPostUpdateWorker(unittest.TestCase):
                     }
                 )
 
+                self.assertEqual(nextcloud_post_update.process_once(
+                    client, now_fn=lambda: 1000
+                ), "pending")
+                self.assertEqual(nextcloud_post_update.process_once(
+                    client, now_fn=lambda: 1119
+                ), "pending")
                 result = nextcloud_post_update.process_once(
-                    client, sleep_fn=lambda _seconds: None
+                    client, sleep_fn=lambda _seconds: None, now_fn=lambda: 1120
                 )
                 second_result = nextcloud_post_update.process_once(
                     client, sleep_fn=lambda _seconds: None
@@ -287,7 +293,10 @@ class TestNextcloudPostUpdateWorker(unittest.TestCase):
             "nextcloud_post_update_commands": "docker exec nextcloud php occ maintenance:repair",
         }), patch.object(nextcloud_post_update, "READY_TIMEOUT_SECONDS", 0):
             nextcloud_post_update._save_state({"image_id": "sha256:old"})
-            self.assertEqual(nextcloud_post_update.process_once(client, sleep_fn=lambda _: None), "not-ready")
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1000), "pending")
+            self.assertEqual(nextcloud_post_update.process_once(
+                client, sleep_fn=lambda _: None, now_fn=lambda: 1120
+            ), "not-ready")
             self.assertEqual(nextcloud_post_update.process_once(client, sleep_fn=lambda _: None), "unchanged")
         self.assertEqual(container.exec_calls, [])
 
@@ -300,9 +309,66 @@ class TestNextcloudPostUpdateWorker(unittest.TestCase):
             "nextcloud_post_update_enabled": False,
         }):
             nextcloud_post_update._save_state({"image_id": "sha256:old"})
-            self.assertEqual(nextcloud_post_update.process_once(client), "disabled")
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1000), "pending")
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1120), "disabled")
         self.assertEqual(container.exec_calls, [])
         self.assertEqual(container.status_calls, [])
+
+    def test_disabled_hook_keeps_the_new_image_pending_until_enabled(self):
+        container = _FakeContainer()
+        client = _FakeClient(container)
+        settings_value = {
+            "nextcloud_post_update_enabled": False,
+            "nextcloud_post_update_commands": "docker exec nextcloud php occ db:add-missing-indices",
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            nextcloud_post_update, "STATE_FILE", os.path.join(directory, "state.json")
+        ), patch.object(nextcloud_post_update, "load_settings", return_value=settings_value):
+            nextcloud_post_update._save_state({"image_id": "sha256:old"})
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1000), "pending")
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1120), "disabled")
+            self.assertNotIn("hook_attempted_image_id", nextcloud_post_update._load_state())
+            settings_value["nextcloud_post_update_enabled"] = True
+            self.assertEqual(nextcloud_post_update.process_once(
+                client, now_fn=lambda: 1121
+            ), "success")
+            self.assertEqual(nextcloud_post_update.process_once(client), "unchanged")
+        self.assertEqual(len(container.exec_calls), 1)
+
+    def test_new_image_during_delay_restarts_the_wait(self):
+        container = _FakeContainer()
+        client = _FakeClient(container)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            nextcloud_post_update, "STATE_FILE", os.path.join(directory, "state.json")
+        ), patch.object(nextcloud_post_update, "load_settings", return_value={
+            "nextcloud_post_update_enabled": True,
+            "nextcloud_post_update_commands": "docker exec nextcloud php occ db:add-missing-indices",
+        }):
+            nextcloud_post_update._save_state({"image_id": "sha256:old"})
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1000), "pending")
+            container.attrs["Image"] = "sha256:newer"
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1100), "pending")
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1120), "pending")
+            self.assertEqual(nextcloud_post_update.process_once(
+                client, now_fn=lambda: 1220
+            ), "success")
+        self.assertEqual(len(container.exec_calls), 1)
+
+    def test_return_to_an_earlier_image_is_a_new_transition(self):
+        container = _FakeContainer(image_id="sha256:old")
+        client = _FakeClient(container)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            nextcloud_post_update, "STATE_FILE", os.path.join(directory, "state.json")
+        ), patch.object(nextcloud_post_update, "load_settings", return_value={
+            "nextcloud_post_update_enabled": True,
+            "nextcloud_post_update_commands": "docker exec nextcloud php occ db:add-missing-indices",
+        }):
+            nextcloud_post_update._save_state({
+                "image_id": "sha256:new", "hook_attempted_image_id": "sha256:old",
+            })
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1000), "pending")
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1120), "success")
+        self.assertEqual(len(container.exec_calls), 1)
 
     def test_status_capture_is_bounded(self):
         container = _FakeContainer()
@@ -337,8 +403,17 @@ class TestNextcloudDiscordNotifications(unittest.TestCase):
         ), patch.object(nextcloud_post_update, "load_settings", return_value=self.settings):
             if baseline:
                 nextcloud_post_update._save_state({"image_id": baseline})
-            result = nextcloud_post_update.process_once(client, sleep_fn=lambda _: None)
-            self.assertEqual(nextcloud_post_update.process_once(client), "unchanged")
+            if baseline:
+                self.assertEqual(nextcloud_post_update.process_once(
+                    client, now_fn=lambda: 1000
+                ), "pending")
+            result = nextcloud_post_update.process_once(
+                client, sleep_fn=lambda _: None, now_fn=lambda: 1120
+            )
+            self.assertEqual(
+                nextcloud_post_update.process_once(client),
+                "unchanged" if self.settings["nextcloud_post_update_enabled"] else "disabled",
+            )
         return result, container
 
     def content(self):

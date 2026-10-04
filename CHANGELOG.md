@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 — 2026-10-04
+
+- Le complément Nextcloud attend deux minutes après la détection d'un nouvel ID d'image avant de vérifier l'état du conteneur et d'exécuter les commandes OCC.
+- L'image en attente et l'heure de détection sont conservées dans le volume de configuration. Un hook désactivé ne consomme plus le changement d'image; l'attente reprend après un redémarrage du worker.
+- Le modèle de commandes Nextcloud inclut les colonnes, indices et clés primaires manquants. Les réparations coûteuses restent à lancer au cas par cas.
+- Le bilan Discord est envoyé après la tentative OCC lorsque les notifications sont configurées.
+
 ## 1.2.0 — 2026-09-21
 
 - Ajout d'un message Discord complémentaire « Complément Nextcloud OK/NOK » après la tentative de commandes OCC, avec le résultat de chaque commande et les commandes non exécutées.

@@ -19,7 +19,7 @@ from settings import CONFIG_DIR, load_settings
 
 STATE_FILE = os.path.join(CONFIG_DIR, "nextcloud_post_update_state.json")
 POLL_SECONDS = 10
-STARTUP_GRACE_SECONDS = 15
+POST_UPDATE_DELAY_SECONDS = 120
 READY_TIMEOUT_SECONDS = 600
 DOCKER_TIMEOUT_SECONDS = 600
 MAX_STATUS_OUTPUT_BYTES = 65536
@@ -113,7 +113,6 @@ def _occ_ready(container, command):
 
 
 def _wait_until_ready(client, image_id, command, sleep_fn=time.sleep):
-    sleep_fn(STARTUP_GRACE_SECONDS)
     deadline = time.monotonic() + READY_TIMEOUT_SECONDS
     while True:
         current = _running_container(client)
@@ -137,9 +136,11 @@ def _command_label(command):
 
 def _notify_discord(settings, result, lines):
     if not settings.get("notifications_discord"):
+        logger.info("Notification Discord du complement Nextcloud desactivee.")
         return
     url = settings.get("discord_webhook_url", "").strip()
     if not url:
+        logger.warning("Notification Discord du complement Nextcloud ignoree: webhook absent.")
         return
     # Recheck persisted configuration and never follow a webhook redirect.
     if not re.fullmatch(
@@ -158,7 +159,9 @@ def _notify_discord(settings, result, lines):
             timeout=15,
             allow_redirects=False,
         ) as response:
-            if not 200 <= response.status_code < 300:
+            if 200 <= response.status_code < 300:
+                logger.info("Notification Discord du complement Nextcloud envoyee.")
+            else:
                 logger.warning("Notification Discord non envoyee (HTTP %s).", response.status_code)
     except requests.RequestException:
         # Request exceptions can include the secret webhook URL.
@@ -217,7 +220,7 @@ def _execute_hook(client, image_id, settings, sleep_fn):
     return ("success" if success else "failed"), lines
 
 
-def process_once(client, sleep_fn=time.sleep):
+def process_once(client, sleep_fn=time.sleep, now_fn=time.time):
     """Inspect Nextcloud and attempt the hook once per observed image transition."""
     current = _running_container(client)
     if current is None:
@@ -226,8 +229,6 @@ def process_once(client, sleep_fn=time.sleep):
 
     state = _load_state()
     previous_image_id = state.get("image_id", "")
-    attempted_image_id = state.get("hook_attempted_image_id", "")
-
     if not previous_image_id:
         _save_state({"image_id": image_id, "hook_attempted_image_id": image_id})
         logger.info("Image Nextcloud initiale enregistree; aucun hook execute.")
@@ -235,18 +236,47 @@ def process_once(client, sleep_fn=time.sleep):
 
     if previous_image_id != image_id:
         state["image_id"] = image_id
+        state["pending_image_id"] = image_id
+        state["pending_since"] = now_fn()
+        state.pop("pending_disabled_logged", None)
         _save_state(state)
-        logger.info("Nouvelle image Nextcloud detectee.")
-    elif attempted_image_id == image_id:
+        logger.info("Nouvelle image Nextcloud detectee; attente de %s secondes.", POST_UPDATE_DELAY_SECONDS)
+        return "pending"
+
+    if (state.get("hook_attempted_image_id") == image_id
+            and state.get("pending_image_id") != image_id):
         return "unchanged"
 
-    settings = load_settings()
-    state["hook_attempted_image_id"] = image_id
-    _save_state(state)
+    # Recover an image transition recorded by a previous worker version or
+    # interrupted before its delay was saved.
+    if state.get("pending_image_id") != image_id or not isinstance(
+        state.get("pending_since"), (int, float)
+    ):
+        state["pending_image_id"] = image_id
+        state["pending_since"] = now_fn()
+        state.pop("pending_disabled_logged", None)
+        _save_state(state)
+        logger.info("Attente du complement Nextcloud initialisee pour la nouvelle image.")
+        return "pending"
 
+    if now_fn() - state["pending_since"] < POST_UPDATE_DELAY_SECONDS:
+        return "pending"
+
+    settings = load_settings()
     if not settings.get("nextcloud_post_update_enabled"):
-        logger.info("Hook Nextcloud desactive; aucune commande executee.")
+        if not state.get("pending_disabled_logged"):
+            logger.info("Hook Nextcloud desactive; nouvelle image en attente.")
+            state["pending_disabled_logged"] = True
+            _save_state(state)
         return "disabled"
+
+    # Record the attempt just before execution to avoid running OCC twice after
+    # a worker crash. A disabled hook never consumes the pending update.
+    state["hook_attempted_image_id"] = image_id
+    state.pop("pending_image_id", None)
+    state.pop("pending_since", None)
+    state.pop("pending_disabled_logged", None)
+    _save_state(state)
 
     result, lines = _execute_hook(client, image_id, settings, sleep_fn)
     _notify_discord(settings, result, lines)
