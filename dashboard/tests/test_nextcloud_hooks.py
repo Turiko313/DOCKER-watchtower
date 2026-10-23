@@ -195,7 +195,7 @@ class TestNextcloudPostUpdateWorker(unittest.TestCase):
             [
                 (
                     "nextcloud-id",
-                    ["occ", "db:add-missing-indices"],
+                    ["php", "/var/www/html/occ", "db:add-missing-indices"],
                     {
                         "stdout": True,
                         "stderr": True,
@@ -207,7 +207,7 @@ class TestNextcloudPostUpdateWorker(unittest.TestCase):
                 ),
                 (
                     "nextcloud-id",
-                    ["php", "occ", "maintenance:repair", "--include-expensive"],
+                    ["php", "/var/www/html/occ", "maintenance:repair", "--include-expensive"],
                     {
                         "stdout": True,
                         "stderr": True,
@@ -282,7 +282,7 @@ class TestNextcloudPostUpdateWorker(unittest.TestCase):
         self.assertIs(result, container)
         self.assertEqual(ready.call_count, 2)
 
-    def test_not_ready_never_runs_commands_or_retries_the_hook(self):
+    def test_not_ready_keeps_update_pending_then_executes_once_when_ready(self):
         container = _FakeContainer()
         client = _FakeClient(container)
         container.status_output = b"Nextcloud upgrade in progress"
@@ -297,8 +297,205 @@ class TestNextcloudPostUpdateWorker(unittest.TestCase):
             self.assertEqual(nextcloud_post_update.process_once(
                 client, sleep_fn=lambda _: None, now_fn=lambda: 1120
             ), "not-ready")
-            self.assertEqual(nextcloud_post_update.process_once(client, sleep_fn=lambda _: None), "unchanged")
-        self.assertEqual(container.exec_calls, [])
+            self.assertEqual(container.exec_calls, [])
+            state = nextcloud_post_update._load_state()
+            self.assertEqual(state["pending_image_id"], "sha256:new")
+            self.assertNotEqual(state.get("hook_attempted_image_id"), "sha256:new")
+            container.status_output = json.dumps({
+                "installed": True, "maintenance": False, "needsDbUpgrade": False,
+            }).encode()
+            original = nextcloud_post_update._exec_occ
+
+            def check_attempt_recorded(container, argv, user, capture_limit=0):
+                if argv[-2:] != ("status", "--output=json"):
+                    self.assertEqual(nextcloud_post_update._load_state()[
+                        "hook_attempted_image_id"
+                    ], "sha256:new")
+                return original(container, argv, user, capture_limit)
+
+            with patch.object(nextcloud_post_update, "_exec_occ", side_effect=check_attempt_recorded):
+                self.assertEqual(nextcloud_post_update.process_once(client), "success")
+            self.assertEqual(nextcloud_post_update.process_once(client), "unchanged")
+        self.assertEqual(len(container.exec_calls), 1)
+
+    def test_short_occ_uses_php_and_absolute_path_on_official_image(self):
+        container = _FakeContainer()
+        _FakeClient(container)
+        commands = nextcloud_hooks.parse_nextcloud_commands(
+            "docker exec -it nextcloud occ db:add-missing-indices"
+        )
+        self.assertTrue(nextcloud_post_update._occ_ready(container, commands[0]))
+        self.assertTrue(nextcloud_post_update._run_commands(container, commands))
+        self.assertEqual(container.status_calls[0][1], [
+            "php", "/var/www/html/occ", "status", "--output=json",
+        ])
+        self.assertEqual(container.exec_calls[0][1], [
+            "php", "/var/www/html/occ", "db:add-missing-indices",
+        ])
+        self.assertEqual(container.exec_calls[0][2]["user"], "www-data")
+
+    def test_linuxserver_uses_php_as_abc_without_root_or_wrapper(self):
+        for image in ("lscr.io/linuxserver/nextcloud:latest", "linuxserver/nextcloud:32",
+                      "ghcr.io/linuxserver/nextcloud:latest",
+                      "ghcr.io/linuxserver/nextcloud@sha256:abc"):
+            with self.subTest(image=image):
+                container = _FakeContainer()
+                container.attrs["Config"] = {"Image": image}
+                _FakeClient(container)
+                commands = nextcloud_hooks.parse_nextcloud_commands(
+                    "docker exec -it nextcloud occ db:add-missing-indices"
+                )
+                self.assertTrue(nextcloud_post_update._occ_ready(container, commands[0]))
+                self.assertTrue(nextcloud_post_update._run_commands(container, commands))
+                for _, argv, options in container.status_calls + container.exec_calls:
+                    self.assertEqual(argv[:2], ["php", "/app/www/public/occ"])
+                    self.assertEqual(options["user"], "abc")
+                    self.assertFalse(options["privileged"])
+
+    def test_user_linuxserver_commands_run_in_order_after_readiness(self):
+        container = _FakeContainer()
+        container.attrs["Config"] = {"Image": "ghcr.io/linuxserver/nextcloud:latest"}
+        client = _FakeClient(container)
+        actions = [
+            ["db:add-missing-columns"],
+            ["db:add-missing-indices"],
+            ["db:add-missing-primary-keys"],
+            ["maintenance:repair", "--include-expensive"],
+            ["app:update", "--all"],
+        ]
+        settings_value = {
+            "nextcloud_post_update_enabled": True,
+            "nextcloud_post_update_commands": "\n".join(
+                "docker exec -it nextcloud occ " + " ".join(action) for action in actions
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            nextcloud_post_update, "STATE_FILE", os.path.join(directory, "state.json")
+        ), patch.object(nextcloud_post_update, "load_settings", return_value=settings_value):
+            nextcloud_post_update._save_state({"image_id": "sha256:old"})
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1000), "pending")
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1120), "success")
+            self.assertEqual(nextcloud_post_update.process_once(client), "unchanged")
+        self.assertEqual([argv for _, argv, _ in container.exec_calls], [
+            ["php", "/app/www/public/occ", *action] for action in actions
+        ])
+        self.assertEqual(len(container.status_calls), 1)
+        for _, _, options in container.status_calls + container.exec_calls:
+            self.assertEqual(options["user"], "abc")
+            self.assertFalse(options["tty"])
+            self.assertFalse(options["stdin"])
+
+    def test_explicit_user_and_absolute_path_are_preserved(self):
+        container = _FakeContainer()
+        container.attrs["Config"] = {"Image": "lscr.io/linuxserver/nextcloud:latest"}
+        for user in ("www-data", "82", "abc"):
+            with self.subTest(user=user):
+                command = nextcloud_hooks.parse_nextcloud_commands(
+                    f"docker exec --user {user} nextcloud php /var/www/html/occ status"
+                )[0]
+                self.assertEqual(nextcloud_post_update._resolve_command(container, command), (
+                    ("php", "/var/www/html/occ", "status"), user,
+                ))
+
+    def test_readiness_diagnostics_describe_failure_without_raw_output(self):
+        container = _FakeContainer()
+        _FakeClient(container)
+        command = nextcloud_hooks.parse_nextcloud_commands("docker exec nextcloud occ status")[0]
+        for output, exit_code, expected in (
+            (b"secret error", 127, "code 127"),
+            (b"secret warning", 0, "JSON valide"),
+            (b"{}", 0, "incomplet"),
+            (b'{"installed":false,"maintenance":false,"needsDbUpgrade":false}', 0, "pas installé"),
+            (b'{"installed":true,"maintenance":true,"needsDbUpgrade":false}', 0, "maintenance"),
+            (b'{"installed":true,"maintenance":false,"needsDbUpgrade":true}', 0, "occ upgrade"),
+        ):
+            with self.subTest(expected=expected), patch.object(
+                nextcloud_post_update, "_exec_occ", return_value=(exit_code, output)
+            ):
+                diagnostics = []
+                self.assertFalse(nextcloud_post_update._occ_ready(container, command, diagnostics))
+                self.assertIn(expected, diagnostics[0])
+                self.assertNotIn("secret", diagnostics[0])
+
+        for error, expected in (
+            (nextcloud_post_update.DockerException("secret"), "refusé par Docker"),
+            (nextcloud_post_update.requests.Timeout("secret"), "erreur réseau"),
+        ):
+            with self.subTest(error=type(error)), patch.object(
+                nextcloud_post_update, "_exec_occ", side_effect=error
+            ):
+                diagnostics = []
+                self.assertFalse(nextcloud_post_update._occ_ready(container, command, diagnostics))
+                self.assertIn(expected, diagnostics[0])
+                self.assertNotIn("secret", diagnostics[0])
+
+    def test_php_warning_does_not_hide_valid_status_or_bypass_maintenance(self):
+        container = _FakeContainer()
+        _FakeClient(container)
+        command = nextcloud_hooks.parse_nextcloud_commands("docker exec nextcloud occ status")[0]
+        for maintenance in (False, True):
+            with self.subTest(maintenance=maintenance):
+                container.status_output = b"PHP Warning: secret\n" + json.dumps({
+                    "installed": True, "maintenance": maintenance, "needsDbUpgrade": False,
+                }).encode() + b"\nPHP Warning: another secret\n"
+                diagnostics = []
+                self.assertEqual(nextcloud_post_update._occ_ready(
+                    container, command, diagnostics
+                ), not maintenance)
+                self.assertNotIn("secret", " ".join(diagnostics))
+                if maintenance:
+                    self.assertIn("maintenance", diagnostics[0])
+
+    def test_transient_docker_failure_during_wait_is_retried(self):
+        container = _FakeContainer()
+        client = _FakeClient(container)
+        command = nextcloud_hooks.parse_nextcloud_commands("docker exec nextcloud occ status")[0]
+        with patch.object(nextcloud_post_update, "_running_container", side_effect=[
+            nextcloud_post_update.DockerException("secret"), (container, "sha256:new"),
+        ]):
+            diagnostics = []
+            self.assertIs(nextcloud_post_update._wait_until_ready(
+                client, "sha256:new", command, sleep_fn=lambda _: None, diagnostics=diagnostics
+            ), container)
+            self.assertEqual(diagnostics, [])
+            self.assertEqual(container.exec_calls, [])
+
+    def test_wait_reports_container_health_and_image_replacement(self):
+        command = nextcloud_hooks.parse_nextcloud_commands("docker exec nextcloud occ status")[0]
+        for state, health, image, expected in (
+            ("exited", None, "sha256:new", "absent ou arrêté"),
+            ("running", "unhealthy", "sha256:new", "healthcheck Docker : unhealthy"),
+            ("running", None, "sha256:other", "image Nextcloud remplacée"),
+        ):
+            with self.subTest(expected=expected), patch.object(nextcloud_post_update, "READY_TIMEOUT_SECONDS", 0):
+                container = _FakeContainer(image_id=image)
+                container.status = state
+                if health:
+                    container.attrs["State"]["Health"] = {"Status": health}
+                diagnostics = []
+                self.assertIsNone(nextcloud_post_update._wait_until_ready(
+                    _FakeClient(container), "sha256:new", command, diagnostics=diagnostics
+                ))
+                self.assertIn(expected, diagnostics[0])
+                self.assertEqual(container.exec_calls, [])
+
+    def test_crash_during_readiness_does_not_consume_update(self):
+        container = _FakeContainer()
+        client = _FakeClient(container)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            nextcloud_post_update, "STATE_FILE", os.path.join(directory, "state.json")
+        ), patch.object(nextcloud_post_update, "load_settings", return_value={
+            "nextcloud_post_update_enabled": True,
+            "nextcloud_post_update_commands": "docker exec nextcloud occ status",
+        }):
+            nextcloud_post_update._save_state({"image_id": "sha256:old"})
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1000), "pending")
+            with patch.object(nextcloud_post_update, "_wait_until_ready", side_effect=RuntimeError("crash")):
+                with self.assertRaises(RuntimeError):
+                    nextcloud_post_update.process_once(client, now_fn=lambda: 1120)
+            self.assertEqual(nextcloud_post_update._load_state()["pending_image_id"], "sha256:new")
+            self.assertNotIn("hook_attempted_image_id", nextcloud_post_update._load_state())
+            self.assertEqual(container.exec_calls, [])
 
     def test_disabled_hook_does_not_exec_even_a_readiness_probe(self):
         container = _FakeContainer()
@@ -412,7 +609,8 @@ class TestNextcloudDiscordNotifications(unittest.TestCase):
             )
             self.assertEqual(
                 nextcloud_post_update.process_once(client),
-                "unchanged" if self.settings["nextcloud_post_update_enabled"] else "disabled",
+                ("not-ready" if result == "not-ready" else "unchanged")
+                if self.settings["nextcloud_post_update_enabled"] else "disabled",
             )
         return result, container
 
@@ -462,6 +660,29 @@ class TestNextcloudDiscordNotifications(unittest.TestCase):
                 self.assertEqual(result, "invalid")
                 self.assertEqual(container.exec_calls, [])
                 self.assertIn("Complément Nextcloud NOK", self.content())
+
+    def test_readiness_failure_notifies_once_then_reports_success_on_recovery(self):
+        container = _FakeContainer()
+        client = _FakeClient(container)
+        container.status_output = b"not ready"
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            nextcloud_post_update, "STATE_FILE", os.path.join(directory, "state.json")
+        ), patch.object(nextcloud_post_update, "load_settings", return_value=self.settings), patch.object(
+            nextcloud_post_update, "READY_TIMEOUT_SECONDS", 0
+        ):
+            nextcloud_post_update._save_state({"image_id": "sha256:old"})
+            nextcloud_post_update.process_once(client, now_fn=lambda: 1000)
+            for _ in range(2):
+                self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1120), "not-ready")
+            self.assertIn("JSON valide", self.content())
+            self.assertIn("Nouvelle vérification automatique", self.content())
+            self.assertEqual(container.exec_calls, [])
+            container.status_output = b'{"installed":true,"maintenance":false,"needsDbUpgrade":false}'
+            self.assertEqual(nextcloud_post_update.process_once(client, now_fn=lambda: 1120), "success")
+            self.assertEqual(nextcloud_post_update.process_once(client), "unchanged")
+            self.assertEqual(self.post.call_count, 2)
+            self.assertIn("Complément Nextcloud OK", self.post.call_args.kwargs["json"]["content"])
+            self.assertEqual(len(container.exec_calls), 3)
 
     def test_docker_failure_reports_interrupted_command(self):
         original = nextcloud_post_update._exec_occ

@@ -93,37 +93,101 @@ def _exec_occ(container, argv, user, capture_limit=0):
     return api.exec_inspect(exec_id).get("ExitCode"), bytes(output)
 
 
-def _occ_ready(container, command):
+def _resolve_command(container, command):
+    """Use PHP directly; LinuxServer's occ wrapper needs sudo/root and a shell."""
+    image = container.attrs.get("Config", {}).get("Image", "")
+    repository = image.split("@", 1)[0].split(":", 1)[0]
+    linuxserver = repository in {
+        "linuxserver/nextcloud", "docker.io/linuxserver/nextcloud",
+        "lscr.io/linuxserver/nextcloud", "ghcr.io/linuxserver/nextcloud",
+    }
     prefix_length = 2 if str(PurePosixPath(command.argv[0])) == "php" else 1
-    argv = (*command.argv[:prefix_length], "status", "--output=json")
+    path = command.argv[prefix_length - 1]
+    if str(PurePosixPath(path)) == "occ":
+        path = "/app/www/public/occ" if linuxserver else "/var/www/html/occ"
+    user = "abc" if linuxserver and not command.explicit_user else command.user
+    return ("php", path, *command.argv[prefix_length:]), user
+
+
+def _parse_occ_status(output):
+    try:
+        return json.loads(output)
+    except ValueError:
+        # PHP or image startup warnings may surround the single-line JSON.
+        # Keep validating all readiness fields; never include raw output in logs.
+        for line in output.splitlines():
+            if line.lstrip().startswith(b"{"):
+                try:
+                    status = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(status, dict) and all(
+                    key in status for key in ("installed", "maintenance", "needsDbUpgrade")
+                ):
+                    return status
+        raise ValueError("No OCC status JSON") from None
+
+
+def _occ_ready(container, command, diagnostics=None):
+    resolved, user = _resolve_command(container, command)
+    argv = (*resolved[:2], "status", "--output=json")
+    reason = None
     try:
         exit_code, output = _exec_occ(
-            container, argv, command.user, capture_limit=MAX_STATUS_OUTPUT_BYTES
+            container, argv, user, capture_limit=MAX_STATUS_OUTPUT_BYTES
         )
-        status = json.loads(output)
-    except (DockerException, ValueError, UnicodeError):
-        return False
-    return (
-        exit_code == 0
-        and isinstance(status, dict)
-        and status.get("installed") is True
-        and status.get("maintenance") is False
-        and status.get("needsDbUpgrade") is False
-    )
+        if exit_code != 0:
+            reason = f"occ status a échoué (code {exit_code}; vérifier l'utilisateur et le chemin OCC)"
+        else:
+            status = _parse_occ_status(output)
+            if not isinstance(status, dict) or any(
+                not isinstance(status.get(key), bool)
+                for key in ("installed", "maintenance", "needsDbUpgrade")
+            ):
+                reason = "état OCC incomplet ou invalide"
+            elif not status["installed"]:
+                reason = "Nextcloud n'est pas installé"
+            elif status["maintenance"]:
+                reason = "Nextcloud est en maintenance"
+            elif status["needsDbUpgrade"]:
+                reason = "migration de base de données Nextcloud en attente (occ upgrade)"
+    except DockerException:
+        reason = "contrôle OCC refusé par Docker (vérifier l'utilisateur et l'exécutable)"
+    except requests.RequestException:
+        reason = "erreur réseau pendant le contrôle OCC"
+    except (ValueError, UnicodeError):
+        reason = "occ status n'a pas renvoyé un JSON valide"
+    if diagnostics is not None:
+        diagnostics[:] = [reason] if reason else []
+    return reason is None
 
 
-def _wait_until_ready(client, image_id, command, sleep_fn=time.sleep):
+def _wait_until_ready(client, image_id, command, sleep_fn=time.sleep, diagnostics=None):
+    if diagnostics is None:
+        diagnostics = []
     deadline = time.monotonic() + READY_TIMEOUT_SECONDS
     while True:
-        current = _running_container(client)
+        try:
+            current = _running_container(client)
+        except (DockerException, requests.RequestException):
+            diagnostics[:] = ["Docker indisponible pendant le contrôle du conteneur"]
+            current = None
+        else:
+            if current is None:
+                diagnostics[:] = ["conteneur nextcloud absent ou arrêté"]
         if current is not None and current[1] != image_id:
+            diagnostics[:] = ["image Nextcloud remplacée pendant l'attente"]
             return None
         if current is not None:
             container = current[0]
             health = container.attrs.get("State", {}).get("Health", {}).get("Status")
-            if (not health or health == "healthy") and _occ_ready(container, command):
+            if health and health != "healthy":
+                health_label = health if health in {"starting", "unhealthy"} else "inconnu"
+                diagnostics[:] = [f"healthcheck Docker : {health_label}"]
+            elif _occ_ready(container, command, diagnostics=diagnostics):
                 return container
         if time.monotonic() >= deadline:
+            logger.warning("Delai d'attente Nextcloud depasse : %s.", "; ".join(diagnostics))
             return None
         sleep_fn(5)
 
@@ -175,7 +239,8 @@ def _run_commands(container, commands, results=None):
         logger.info("Execution de la commande OCC %s/%s.", index, len(commands))
         label = f"{index}. {_command_label(command)}"
         results.append(f"{label} : NOK (exécution interrompue)")
-        exit_code, _ = _exec_occ(container, command.argv, command.user)
+        argv, user = _resolve_command(container, command)
+        exit_code, _ = _exec_occ(container, argv, user)
         if exit_code != 0:
             results[-1] = f"{label} : NOK (code {exit_code})"
             logger.error(
@@ -189,7 +254,7 @@ def _run_commands(container, commands, results=None):
     return True
 
 
-def _execute_hook(client, image_id, settings, sleep_fn):
+def _execute_hook(client, image_id, settings, sleep_fn, before_commands=None):
     try:
         commands = parse_nextcloud_commands(
             settings.get("nextcloud_post_update_commands", "")
@@ -203,10 +268,18 @@ def _execute_hook(client, image_id, settings, sleep_fn):
 
     lines = []
     try:
-        container = _wait_until_ready(client, image_id, commands[0], sleep_fn=sleep_fn)
+        diagnostics = []
+        container = _wait_until_ready(
+            client, image_id, commands[0], sleep_fn=sleep_fn, diagnostics=diagnostics
+        )
         if container is None:
-            logger.error("Nextcloud n'est pas devenu pret; commandes annulees.")
-            return "not-ready", ["Nextcloud indisponible ou image remplacée; aucune commande exécutée."]
+            reason = diagnostics[0] if diagnostics else "Nextcloud indisponible"
+            logger.warning("Commandes Nextcloud en attente : %s.", reason)
+            return "not-ready", [
+                f"{reason}; aucune commande exécutée. Nouvelle vérification automatique."
+            ]
+        if before_commands is not None:
+            before_commands()
         success = _run_commands(container, commands, results=lines)
     except (DockerException, requests.RequestException):
         logger.warning("Execution du hook Nextcloud interrompue: erreur Docker ou reseau.")
@@ -239,6 +312,7 @@ def process_once(client, sleep_fn=time.sleep, now_fn=time.time):
         state["pending_image_id"] = image_id
         state["pending_since"] = now_fn()
         state.pop("pending_disabled_logged", None)
+        state.pop("readiness_notified", None)
         _save_state(state)
         logger.info("Nouvelle image Nextcloud detectee; attente de %s secondes.", POST_UPDATE_DELAY_SECONDS)
         return "pending"
@@ -270,16 +344,26 @@ def process_once(client, sleep_fn=time.sleep, now_fn=time.time):
             _save_state(state)
         return "disabled"
 
-    # Record the attempt just before execution to avoid running OCC twice after
-    # a worker crash. A disabled hook never consumes the pending update.
-    state["hook_attempted_image_id"] = image_id
-    state.pop("pending_image_id", None)
-    state.pop("pending_since", None)
-    state.pop("pending_disabled_logged", None)
-    _save_state(state)
+    def mark_attempted():
+        # Persist only after readiness, immediately before the first command.
+        # A crash during readiness must not consume an unexecuted update.
+        state["hook_attempted_image_id"] = image_id
+        for key in ("pending_image_id", "pending_since", "pending_disabled_logged", "readiness_notified"):
+            state.pop(key, None)
+        _save_state(state)
 
-    result, lines = _execute_hook(client, image_id, settings, sleep_fn)
-    _notify_discord(settings, result, lines)
+    result, lines = _execute_hook(
+        client, image_id, settings, sleep_fn, before_commands=mark_attempted
+    )
+    if result == "not-ready":
+        if not state.get("readiness_notified"):
+            state["readiness_notified"] = True
+            _save_state(state)
+            _notify_discord(settings, result, lines)
+    else:
+        if state.get("pending_image_id") == image_id:
+            mark_attempted()
+        _notify_discord(settings, result, lines)
     return result
 
 

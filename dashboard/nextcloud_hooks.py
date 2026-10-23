@@ -11,7 +11,7 @@ MAX_COMMANDS = 20
 MAX_ARGUMENTS = 64
 MAX_ARGUMENT_LENGTH = 4096
 _TTY_OPTIONS = {"-i", "-t", "-it", "-ti", "--interactive", "--tty"}
-_ALLOWED_USERS = {"www-data", "33", "82"}
+_ALLOWED_USERS = {"www-data", "33", "82", "abc"}
 _FORBIDDEN_TOKENS = {";", "&", "&&", "|", "||", "<", "<<", ">", ">>"}
 
 
@@ -19,6 +19,7 @@ _FORBIDDEN_TOKENS = {";", "&", "&&", "|", "||", "<", "<<", ">", ">>"}
 class NextcloudExecCommand:
     argv: tuple[str, ...]
     user: str = "www-data"
+    explicit_user: bool = False
 
 
 def _validation_error(line_number, message):
@@ -56,6 +57,7 @@ def parse_nextcloud_commands(command_text):
 
         index = 2
         user = "www-data"
+        explicit_user = False
         while index < len(parts) and parts[index].startswith("-"):
             option = parts[index]
             if option in _TTY_OPTIONS:
@@ -65,10 +67,12 @@ def parse_nextcloud_commands(command_text):
                 if index + 1 >= len(parts):
                     _validation_error(line_number, "utilisateur Docker manquant.")
                 user = parts[index + 1]
+                explicit_user = True
                 index += 2
                 continue
             if option.startswith("--user="):
                 user = option.split("=", 1)[1]
+                explicit_user = True
                 index += 1
                 continue
             _validation_error(line_number, f"option docker exec interdite: {option}.")
@@ -76,7 +80,7 @@ def parse_nextcloud_commands(command_text):
         if user not in _ALLOWED_USERS:
             _validation_error(
                 line_number,
-                "seuls les utilisateurs Nextcloud www-data, 33 et 82 sont autorises.",
+                "seuls les utilisateurs Nextcloud www-data, 33, 82 et abc sont autorises.",
             )
         if index >= len(parts) or parts[index] != NEXTCLOUD_CONTAINER_NAME:
             _validation_error(
@@ -124,7 +128,7 @@ def parse_nextcloud_commands(command_text):
                     line_number, "les operateurs et substitutions shell sont interdits."
                 )
 
-        commands.append(NextcloudExecCommand(tuple(argv), user))
+        commands.append(NextcloudExecCommand(tuple(argv), user, explicit_user))
         if len(commands) > MAX_COMMANDS:
             raise ValueError(f"Un maximum de {MAX_COMMANDS} commandes est autorise.")
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.2 — 2026-10-23
+
+- Exécution des formes courtes OCC via PHP et un chemin absolu; détection des images LinuxServer pour utiliser le chemin `/app/www/public/occ` et l'utilisateur `abc` en l'absence de `--user`, sans wrapper ni shell.
+- Un contrôle de disponibilité échoué ne consomme plus la mise à jour : les commandes restent en attente, y compris après un redémarrage. La tentative définitive est enregistrée juste avant la première commande.
+- Le NOK indique désormais la cause du blocage (healthcheck, maintenance, migration, contrôle OCC ou Docker). Les avertissements PHP entourant un statut JSON valide sont tolérés; les sorties brutes restent privées.
+- Un seul NOK est envoyé pendant l'attente, puis le bilan des commandes lors de leur exécution. Documentation du réarmement d'une annulation produite par une ancienne version.
+
+Validation locale : 54 tests réussis, dont la séquence des cinq commandes fournie pour `ghcr.io/linuxserver/nextcloud:latest`. Contrôles Docker et notifications simulés; aucune commande exécutée sur une instance Nextcloud réelle.
+
 ## 1.2.1 — 2026-10-04
 
 - Le complément Nextcloud attend deux minutes après la détection d'un nouvel ID d'image avant de vérifier l'état du conteneur et d'exécuter les commandes OCC.

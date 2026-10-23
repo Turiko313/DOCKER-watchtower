@@ -143,8 +143,10 @@ reste identique. La première image observée initialise seulement la référenc
 volume de configuration et attend environ deux minutes, même après un redémarrage
 du worker. Il attend ensuite que le conteneur soit démarré (et sain si un healthcheck
 existe), puis vérifie avec `occ status --output=json` que Nextcloud est installé,
-hors maintenance et sans migration de base de données en attente. Il réessaie pendant
-environ dix minutes avant d'abandonner si Nextcloud reste indisponible.
+hors maintenance et sans migration de base de données en attente. Après environ
+dix minutes d'indisponibilité, il signale la cause précise et conserve les commandes
+en attente. Les vérifications reprennent automatiquement, y compris après un
+redémarrage, jusqu'à ce que Nextcloud soit prêt ou que l'image soit remplacée.
 Il exécute ensuite les lignes dans l'ordre, avec une seule tentative par changement
 d'image détecté. Si le hook est désactivé, la nouvelle image reste en attente jusqu'à
 son activation. Un redémarrage avec la même image ne relance pas les commandes déjà
@@ -162,10 +164,36 @@ docker exec --user www-data nextcloud php occ db:add-missing-primary-keys
 
 Les formes courtes comme `docker exec -it nextcloud occ ...` sont aussi
 acceptées; `-i` et `-t` sont ignorés car le worker n'utilise pas de terminal.
+Le worker appelle directement `php /var/www/html/occ` pour l'image officielle :
+le binaire `occ` n'a pas besoin d'être dans le `PATH`, ni le répertoire courant
+de correspondre à celui de Nextcloud.
+
+Pour les images LinuxServer (`linuxserver/nextcloud`, `docker.io/linuxserver/nextcloud`,
+`lscr.io/linuxserver/nextcloud` ou `ghcr.io/linuxserver/nextcloud`), utilisez des
+commandes sans `--user`, y compris pour `ghcr.io/linuxserver/nextcloud:latest` :
+
+```text
+docker exec -it nextcloud occ db:add-missing-columns
+docker exec -it nextcloud occ db:add-missing-indices
+docker exec -it nextcloud occ db:add-missing-primary-keys
+docker exec -it nextcloud occ maintenance:repair --include-expensive
+docker exec -it nextcloud occ app:update --all
+```
+
+Les deux dernières lignes sont facultatives : ajoutez-les si vous souhaitez aussi
+exécuter les réparations coûteuses et mettre à jour toutes les applications.
+
+Le worker détecte ces références d'image dans la configuration du conteneur et
+appelle directement `php /app/www/public/occ` sous l'utilisateur `abc`, sans
+utiliser le wrapper `occ`, `sudo` ou un shell. Sans utilisateur explicite, les
+autres images utilisent `www-data`. Un `--user` ou un chemin OCC absolu explicite
+reste prioritaire. Les images personnalisées ou miroirs LinuxServer ne sont pas
+détectés automatiquement.
+
 Pour éviter de transformer le dashboard en shell distant :
 
 - la cible est verrouillée sur `nextcloud` ;
-- seuls `occ`, `php occ` et les utilisateurs `www-data`, `33` ou `82` sont acceptés ;
+- seuls `occ`, `php occ` et les utilisateurs `www-data`, `33`, `82` ou `abc` sont acceptés ;
 - les pipes, redirections, substitutions shell et autres options Docker sont refusés ;
 - l'exécution passe directement par l'API Docker, sans shell ;
 - un maximum de 20 commandes et 8 192 caractères est accepté ;
@@ -174,8 +202,25 @@ Pour éviter de transformer le dashboard en shell distant :
 Les statuts de réussite ou d'échec sont visibles dans les journaux de
 `watchtower-dashboard` avec le préfixe `nextcloud-post-update`; la sortie détaillée
 des commandes n'est pas conservée. En cas d'échec, corrigez puis exécutez si nécessaire
-la commande manuellement en SSH. Une tentative échouée ou interrompue n'est pas
-reprise automatiquement sur la même image, pour éviter les doubles exécutions.
+la commande manuellement en SSH. Dès que l'exécution de la première commande a
+été autorisée, une tentative échouée ou interrompue n'est pas reprise automatiquement
+sur la même image, pour éviter les doubles exécutions. Un échec des seuls contrôles
+de disponibilité conserve les commandes en attente. Leurs diagnostics distinguent
+le healthcheck, la maintenance, une migration en attente, un JSON invalide et
+un échec de `occ status`; les sorties brutes ne sont pas divulguées.
+
+Si une ancienne version a déjà envoyé exactement « Nextcloud indisponible ou
+image remplacée; aucune commande exécutée », elle a enregistré cette image comme
+déjà tentée. Après déploiement du correctif et vérification des commandes dans
+Settings, cette commande réarme le complément pour l'image courante :
+
+```bash
+docker exec watchtower-dashboard python -c "import nextcloud_post_update as n; s=n._load_state(); s.pop('hook_attempted_image_id', None); n._save_state(s)"
+```
+
+Le worker attend de nouveau environ deux minutes puis reprend ses vérifications.
+Ce réarmement est destiné à cette annulation avant exécution; si des commandes
+ont déjà été exécutées, vérifiez leur résultat avant de les relancer.
 
 Si les notifications Discord sont activées et le webhook renseigné, le worker
 envoie un **message complémentaire distinct du rapport Watchtower** à la fin de
@@ -185,6 +230,9 @@ par son numéro et son action OCC, avec `OK`, `NOK` (code de sortie si disponibl
 ou `non exécutée` si une commande précédente a échoué. Les arguments et sorties
 des commandes ne sont pas envoyés. Une configuration invalide ou un Nextcloud
 indisponible produit également un NOK avec la raison de l'annulation.
+Pour une indisponibilité persistante, le NOK n'est envoyé qu'une fois par
+changement d'image; un nouveau bilan est envoyé lorsque les commandes finissent
+par être exécutées.
 Aucun complément n'est envoyé si le hook est désactivé, lors de l'initialisation
 ou si l'image ne change pas. Un échec d'envoi Discord est journalisé, sans
 relancer les commandes ni réessayer automatiquement l'envoi.

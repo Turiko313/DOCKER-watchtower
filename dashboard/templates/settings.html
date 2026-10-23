@@ -107,11 +107,14 @@
       <label for="nextcloud_post_update_commands">Commandes (une par ligne)</label>
       <textarea id="nextcloud_post_update_commands" name="nextcloud_post_update_commands"
                 maxlength="8192" spellcheck="false"
-                placeholder="docker exec --user www-data nextcloud php occ db:add-missing-columns&#10;docker exec --user www-data nextcloud php occ db:add-missing-indices&#10;docker exec --user www-data nextcloud php occ db:add-missing-primary-keys">{{ settings.nextcloud_post_update_commands }}</textarea>
+                placeholder="docker exec nextcloud occ db:add-missing-columns&#10;docker exec nextcloud occ db:add-missing-indices&#10;docker exec nextcloud occ db:add-missing-primary-keys">{{ settings.nextcloud_post_update_commands }}</textarea>
       <div style="font-size:.8rem;color:#8b949e;margin-top:.25rem">
         Le conteneur doit s'appeler <code>nextcloud</code>. Seules les commandes <code>occ</code> ou
         <code>php occ</code> sont acceptees; <code>-it</code> est tolere mais ignore. Elles sont executees
         environ 2 minutes apres un changement d'image, une fois Nextcloud pret, dans l'ordre et sans shell.
+        Sans <code>--user</code>, le worker utilise <code>www-data</code> pour l'image officielle et
+        <code>abc</code> pour les images LinuxServer reconnues. Le chemin OCC relatif est adapte a l'image.
+        Si Nextcloud reste indisponible, les commandes restent en attente et le motif est indique dans le bilan.
         La suite s'arrete au premier echec. Un redemarrage avec la meme image ne les relance pas.
       </div>
     </div>
