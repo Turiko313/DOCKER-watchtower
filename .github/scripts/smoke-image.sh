@@ -4,7 +4,7 @@ set -euo pipefail
 
 image=${1:?Image to validate is required}
 docker run --rm --entrypoint python "$image" -m pip check
-docker run --rm --entrypoint /usr/local/bin/watchtower "$image" --version
+docker run --rm --entrypoint /usr/local/bin/watchtower "$image" --help >/dev/null
 docker run --rm --entrypoint python \
   --volume "$PWD/dashboard/tests:/app/tests:ro" \
   "$image" -m unittest discover -s /app/tests -v
