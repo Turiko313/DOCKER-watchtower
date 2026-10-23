@@ -20,14 +20,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12"
+          python-version: "3.15.1"
           cache: pip
           cache-dependency-path: dashboard/requirements.txt
 
       - name: Install locked dependencies
-        run: python -m pip install --require-hashes -r dashboard/requirements.txt
+        run: |
+          python -m pip install --require-hashes -r dashboard/requirements.txt
+          python -m pip check
 
       - name: Run unit and security tests
         env:
@@ -81,7 +83,21 @@ jobs:
             type=sha,prefix=
             type=semver,pattern={{version}}
 
+      - name: Build image for validation
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: watchtower-dashboard:ci
+          provenance: false
+          sbom: false
+
+      - name: Validate image before publication
+        run: bash .github/scripts/smoke-image.sh watchtower-dashboard:ci
+
       - name: Build and push
+        id: publish
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -91,3 +107,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: mode=max
           sbom: true
+
+      - name: Verify published image
+        env:
+          PUBLISHED_IMAGE: ghcr.io/turiko313/watchtower-dashboard@${{ steps.publish.outputs.digest }}
+        run: docker buildx imagetools inspect "$PUBLISHED_IMAGE"

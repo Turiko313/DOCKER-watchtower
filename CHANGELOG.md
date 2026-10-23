@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 — 2026-10-23
+
+- Watchtower 1.23.2, épinglé au commit `cd5946be205ea0a60dd31235a11f04ac9851ebf6`; images de base Go 1.27.3 et Python 3.15.1 Alpine, avec digests vérifiés.
+- Dépendances Python actualisées : certifi 2026.10.23, charset-normalizer 3.5.2, MarkupSafe 3.0.4 et Werkzeug 3.1.9. Les mises à jour certifi et Werkzeug corrigent les deux vulnérabilités qui bloquaient l'audit de la version 1.2.2.
+- Verrouillage et hashes des dépendances régénérés pour Python 3.15 sous Linux avec uv. Les autres dépendances Python et l'outil pip-audit sont déjà aux dernières versions stables disponibles.
+- Action setup-python 7.1.0 épinglée par SHA; versions et SHA des autres actions GitHub vérifiés.
+- La CI contrôle les dépendances installées, exécute les 54 tests dans l'image Alpine construite et vérifie le démarrage des trois processus, l'authentification, les pages du dashboard et les métriques Watchtower avant publication. Après publication, elle vérifie que l'image est accessible dans GHCR par son digest.
+
 ## 1.2.2 — 2026-10-23
 
 - Exécution des formes courtes OCC via PHP et un chemin absolu; détection des images LinuxServer pour utiliser le chemin `/app/www/public/occ` et l'utilisateur `abc` en l'absence de `--user`, sans wrapper ni shell.

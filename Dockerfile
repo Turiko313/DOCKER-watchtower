@@ -1,10 +1,10 @@
 # =============================================================
 # Stage 1 - Build the maintained Watchtower fork from an immutable commit
 # =============================================================
-FROM golang:1.27.1-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS builder
+FROM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
 
-ARG WATCHTOWER_VERSION=v1.22.2
-ARG WATCHTOWER_COMMIT=32ad1ae001ab41bef94bbed3827e6caca4df01c7
+ARG WATCHTOWER_VERSION=v1.23.2
+ARG WATCHTOWER_COMMIT=cd5946be205ea0a60dd31235a11f04ac9851ebf6
 
 RUN apk add --no-cache ca-certificates git
 
@@ -23,7 +23,7 @@ RUN git clone --branch "${WATCHTOWER_VERSION}" --depth 1 \
 # =============================================================
 # Stage 2 - Final image: Python + Watchtower + Dashboard
 # =============================================================
-FROM python:3.12-alpine@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b
+FROM python:3.15.1-alpine@sha256:54448f67d7c31c39e5cdd3ea2d6382395ce142806c284425f8e897d78a0465b3
 
 RUN apk add --no-cache ca-certificates tzdata
 
@@ -57,7 +57,7 @@ RUN chmod +x /usr/local/bin/start_watchtower.py
 
 LABEL org.opencontainers.image.source="https://github.com/Turiko313/DOCKER-watchtower" \
       org.opencontainers.image.description="Maintained Watchtower fork + secured dashboard" \
-      org.opencontainers.image.version="1.2.2"
+      org.opencontainers.image.version="1.3.0"
 
 EXPOSE 5000
 

@@ -3,6 +3,8 @@
 .github
 .vs
 .vscode
+.venv
+venv
 __pycache__
 *.py[cod]
 dashboard/tests

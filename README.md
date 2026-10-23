@@ -2,7 +2,7 @@
 
 Image tout-en-un pour mettre à jour des conteneurs Docker avec :
 
-- le fork maintenu **[nicholas-fedor/watchtower](https://github.com/nicholas-fedor/watchtower)**, figé en version `v1.22.2` ;
+- le fork maintenu **[nicholas-fedor/watchtower](https://github.com/nicholas-fedor/watchtower)**, figé en version `v1.23.2` ;
 - un dashboard Flask/Gunicorn pour consulter les conteneurs, les métriques et déclencher une vérification ;
 - une page de paramètres persistée dans un volume Docker ;
 - des notifications Discord via Shoutrrr ;
@@ -11,7 +11,7 @@ Image tout-en-un pour mettre à jour des conteneurs Docker avec :
 
 L’ancien projet `containrrr/watchtower` est archivé. Cette image compile le fork
 maintenu depuis son commit immuable
-`32ad1ae001ab41bef94bbed3827e6caca4df01c7`.
+`cd5946be205ea0a60dd31235a11f04ac9851ebf6`.
 
 ## Installation
 
@@ -295,6 +295,25 @@ docker compose up -d --force-recreate
 
 # Tests locaux
 python -m unittest discover -s dashboard/tests -v
+
+# Audit des dépendances verrouillées (pip-audit 2.10.1)
+python -m pip_audit --disable-pip -r dashboard/requirements.txt
+```
+
+La CI utilise Python 3.15.1. Avant de publier une version, elle exige la réussite
+des tests, de `pip check`, de l'audit et de la validation Compose. Elle construit
+ensuite l'image et la teste sous Alpine : mêmes tests, démarrage des trois
+processus, authentification du dashboard et accès aux métriques Watchtower.
+La publication intervient après ces contrôles et est vérifiée par digest dans
+GHCR. Un push Git ou un tag ne garantit donc pas à lui seul une image publiée :
+le workflow correspondant doit être terminé avec succès.
+
+Pour régénérer le verrouillage avec les versions stables compatibles :
+
+```bash
+uv pip compile dashboard/requirements.in --python-version 3.15 \
+  --python-platform x86_64-unknown-linux-musl --generate-hashes --upgrade \
+  --output-file dashboard/requirements.txt
 ```
 
 ## Dépannage
