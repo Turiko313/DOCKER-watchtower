@@ -9,6 +9,8 @@
 
 Validation locale : 85 tests Python et tests navigateur réussis, avec API simulées. Validation du moteur Go et du remplacement Docker réel confiée à la CI.
 
+Validation CI réussie sur Alpine : tests Go, 85 tests Python et remplacement réel de l'image d'un conteneur exclu. Son exclusion automatique et ses labels sont conservés; l'image et la date de lancement du conteneur voisin restent inchangées.
+
 ## 1.5.0 — 2026-10-27
 
 - Bouton **Redémarrer** à côté de **Mettre à jour**, pour un conteneur ou un groupe complet. Le redémarrage utilise directement l'API Docker et reste disponible pour les conteneurs exclus des mises à jour Watchtower.

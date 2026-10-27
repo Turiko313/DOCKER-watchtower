@@ -125,7 +125,7 @@ déclenche la demande d’identifiants HTTP Basic du navigateur.
 
 Dans le dashboard, le bouton **Mettre à jour** au début de chaque ligne lance
 une vérification et applique la nouvelle image si elle est disponible pour ce
-conteneur. Sur une ligne de groupe, il cible les conteneurs surveillés utilisant
+conteneur. Sur une ligne de groupe, il cible tous les conteneurs utilisant
 cette image, y compris ceux exclus de la surveillance automatique. Dépliez le
 groupe pour mettre à jour un seul de ses conteneurs.
 Le bouton global **Vérifier maintenant** conserve la vérification générale.
