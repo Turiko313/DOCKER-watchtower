@@ -21,17 +21,35 @@ container_id=$(docker run --detach --read-only \
   --env WATCHTOWER_HTTP_API_PERIODIC_POLLS=true \
   --env WATCHTOWER_HTTP_API_TOKEN=test-watchtower-token-at-least-32-chars \
   --env WATCHTOWER_MONITOR_ONLY=true \
+  --env WATCHTOWER_NO_PULL=true \
   --env WATCHTOWER_LABEL_ENABLE=true \
   --env DASHBOARD_USERNAME=test-user \
   --env DASHBOARD_PASSWORD=test-password \
   --env SECRET_KEY=test-secret-key-with-at-least-32-characters \
   "$image")
 
+probe_ids=()
 cleanup() {
   docker logs "$container_id" || true
+  if ((${#probe_ids[@]})); then
+    docker rm --force "${probe_ids[@]}" >/dev/null || true
+  fi
   docker rm --force "$container_id" >/dev/null || true
 }
 trap cleanup EXIT
+
+# Same image and similar names: a targeted scan/restart must leave the sibling
+# untouched. These disposable probes never run Watchtower or application data.
+probe_name="watchtower-smoke-${container_id:0:12}.one"
+sibling_name="${probe_name}-other"
+for name in "$probe_name" "$sibling_name"; do
+  probe_ids+=("$(docker run --detach --read-only --no-healthcheck \
+    --security-opt no-new-privileges:true --cap-drop ALL \
+    --name "$name" \
+    --label com.centurylinklabs.watchtower.enable=true \
+    --label com.centurylinklabs.watchtower.no-pull=true \
+    --entrypoint python "$image" -c 'import time; time.sleep(600)')")
+done
 
 health=starting
 for ((attempt=0; attempt<90; attempt++)); do
@@ -49,8 +67,11 @@ if [[ "$health" != healthy ]]; then
   exit 1
 fi
 
-docker exec "$container_id" python -c '
+docker exec --env TARGET_NAME="$probe_name" --env SIBLING_NAME="$sibling_name" "$container_id" python -c '
+import os
+import docker
 import requests
+from app import CSRF_TOKEN
 base = "http://127.0.0.1:5000"
 assert requests.get(base, timeout=10).status_code == 401
 auth = ("test-user", "test-password")
@@ -64,4 +85,26 @@ response = requests.get(
 )
 assert response.status_code == 200, response.status_code
 print("Dashboard authentication, pages and Watchtower metrics: OK")
+
+target, sibling = os.environ["TARGET_NAME"], os.environ["SIBLING_NAME"]
+client = docker.from_env()
+before = {name: client.containers.get(name).attrs["State"]["StartedAt"] for name in (target, sibling)}
+headers = {"X-CSRF-Token": CSRF_TOKEN}
+assert requests.post(base + "/restart", auth=auth, data={"container": target}, timeout=10).status_code == 403
+assert requests.post(base + "/restart", auth=auth, headers=headers, timeout=10).status_code == 400
+response = requests.post(base + "/update", auth=auth, headers=headers, data={"container": target}, timeout=90)
+assert response.status_code == 200, (response.status_code, response.text)
+assert response.json()["status"] == "success", response.text
+assert response.json()["message"].startswith("Vérification terminée : 1 vérifié(s),"), response.text
+response = requests.post(base + "/restart", auth=auth, headers=headers, data={"container": target}, timeout=60)
+assert response.status_code == 200, (response.status_code, response.text)
+assert response.json()["status"] == "success", response.text
+for name in (target, sibling):
+    state = client.containers.get(name).attrs["State"]
+    assert state["Status"] == "running", (name, state["Status"])
+    assert (state["StartedAt"] != before[name]) == (name == target), name
+response = requests.get(base + "/restart/status", auth=auth, params={"container": target}, timeout=10)
+assert response.status_code == 200, response.text
+assert [c["name"] for c in response.json()["containers"]] == [target], response.text
+print("Targeted Watchtower scan and Docker restart: OK; sibling untouched")
 '

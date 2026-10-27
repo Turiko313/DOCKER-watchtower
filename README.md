@@ -132,6 +132,27 @@ uniquement. Les boutons des conteneurs explicitement exclus sont désactivés.
 Le bilan affiche les nombres de conteneurs vérifiés, mis à jour, ignorés et en
 échec. Le tableau s'actualise après la réponse.
 
+Le bouton **Redémarrer**, placé à côté de **Mettre à jour**, redémarre le
+conteneur via Docker, sans changer son image. Sur une ligne de groupe, il
+redémarre tous les conteneurs de ce groupe, y compris ceux exclus des mises à
+jour Watchtower. Comme `docker restart`, il peut aussi démarrer un conteneur
+arrêté. Chaque résultat est vérifié : le conteneur doit être démarré avec une
+nouvelle date de lancement. Cette vérification ne garantit pas que l'application
+a terminé son initialisation ou que son healthcheck est déjà sain.
+
+Les boutons d'action sont **bleus** au repos. Une action confirmée les passe en
+**vert pendant deux minutes**, puis ils redeviennent bleus. Un échec ou un
+résultat non confirmé les passe en **rouge jusqu'à une nouvelle tentative**.
+Un symbole complète la couleur. Ces états sont conservés lors des actualisations
+automatiques et des rechargements, dans la session de l'onglet. Pendant une action,
+les boutons sont désactivés pour éviter les doubles clics.
+
+Lors du redémarrage du dashboard lui-même, la connexion peut être interrompue.
+Le navigateur attend son retour et vérifie les dates de lancement des conteneurs
+pendant environ une minute, sans renvoyer la demande de redémarrage. Si le
+résultat ne peut pas être confirmé, le bouton reste rouge : vérifiez Docker
+avant de relancer.
+
 La page **Settings** gère :
 
 - la planification cron à six champs ou l’intervalle de vérification ;
@@ -310,6 +331,15 @@ python -m unittest discover -s dashboard/tests -v
 
 # Audit des dépendances verrouillées (pip-audit 2.10.1)
 python -m pip_audit --disable-pip -r dashboard/requirements.txt
+```
+
+Les interactions des boutons peuvent aussi être vérifiées avec le script
+optionnel suivant, après installation de Playwright et de Chromium dans un
+environnement de développement. Il utilise des API Docker et Watchtower simulées
+et ne modifie aucun conteneur réel :
+
+```bash
+python dashboard/tests/browser_manual_actions.py
 ```
 
 La CI utilise Python 3.15.1. Avant de publier une version, elle exige la réussite

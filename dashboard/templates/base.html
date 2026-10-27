@@ -48,7 +48,24 @@
     .btn-primary{background:#238636;border-color:#238636;color:#fff}
     .btn-primary:hover{background:#2ea043}
     .btn:disabled{opacity:.5;cursor:not-allowed}
-    .btn-update{white-space:nowrap;padding:.4rem .6rem;font-size:.8rem}
+    .container-actions{display:flex;gap:.45rem;align-items:center}
+    .container-action{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;white-space:nowrap;padding:.48rem .7rem;border-radius:7px;background:#1f6feb;border-color:#388bfd;color:#fff;font-size:.8rem;line-height:1.25;font-weight:600;box-shadow:0 1px 2px #0004;transition:background-color .16s,border-color .16s}
+    .container-action:hover:not(:disabled){background:#1158c7;border-color:#79c0ff}
+    .container-action:focus-visible{outline:2px solid #79c0ff;outline-offset:3px}
+    .container-action[data-result=success]{background:#238636;border-color:#3fb950}
+    .container-action[data-result=success]:hover:not(:disabled){background:#196c2e}
+    .container-action[data-result=error]{background:#b62324;border-color:#f85149}
+    .container-action[data-result=error]:hover:not(:disabled){background:#9c1c1d}
+    .container-action[aria-busy=true]{opacity:1;cursor:progress}
+    .container-action .spinner{margin:0;width:13px;height:13px}
+    .action-icon{font-size:1rem;line-height:1;font-weight:700}
+    .action-outcome{font-weight:800}
+    .action-legend{display:flex;flex-wrap:wrap;gap:.4rem 1rem;margin-top:.85rem;color:#8b949e;font-size:.75rem}
+    .action-legend span::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:.35rem;background:#1f6feb}
+    .action-legend .legend-success::before{background:#3fb950}
+    .action-legend .legend-error::before{background:#f85149}
+    @media(max-width:600px){.container-actions{flex-direction:column;align-items:stretch}.container-actions .container-action{width:100%}}
+    @media(prefers-reduced-motion:reduce){.container-action{transition:none}.spinner{animation:none}}
     .btn.filter-btn{padding:.3rem .75rem;font-size:.8rem}
     .btn.filter-btn.active{background:#238636;border-color:#238636;color:#fff}
     .btn-danger{background:#da3633;border-color:#da3633;color:#fff}

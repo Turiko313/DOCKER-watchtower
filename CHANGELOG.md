@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0 — 2026-10-27
+
+- Bouton **Redémarrer** à côté de **Mettre à jour**, pour un conteneur ou un groupe complet. Le redémarrage utilise directement l'API Docker et reste disponible pour les conteneurs exclus des mises à jour Watchtower.
+- Vérification du redémarrage par l'état `running` et une nouvelle date de lancement. Gestion des échecs partiels et vérification après reconnexion si le dashboard redémarre lui-même, sans répétition automatique de l'action.
+- Boutons bleus avec icônes; vert pendant deux minutes après une action confirmée, rouge jusqu'à une nouvelle tentative en cas d'échec. Conservation des états après rafraîchissement ou rechargement dans le même onglet, indicateurs accessibles et disposition adaptée aux petits écrans.
+- Renforcement de la mise à jour ciblée : bilan Watchtower complet et valide exigé, signalement des cibles non vérifiées et des délais de réponse dépassés. Regroupement par la référence d'image configurée dans le conteneur plutôt que par le premier alias d'image.
+- Conservation des groupes ouverts par leur référence d'image lors d'un rafraîchissement et rejet des réponses de rafraîchissement antérieures à une action.
+- Contrôle de l'image en CI étendu à une vérification Watchtower ciblée sans téléchargement et au redémarrage Docker d'un conteneur jetable, avec vérification qu'un conteneur voisin reste inchangé.
+
+Validation locale : 84 tests réussis. Tests Chromium avec API simulées : ciblage, exclusions, résultats, durée de deux minutes avec horloge contrôlée, erreurs persistantes, nouvelles tentatives, actualisation, rechargement, reconnexion sans doublon et affichage mobile. Docker n'étant pas démarré localement, aucun conteneur réel n'a été redémarré; validation de l'image confiée à la CI.
+
 ## 1.4.0 — 2026-10-27
 
 - Bouton **Mettre à jour** au début de chaque ligne d'image ou de groupe, avec une action individuelle dans les groupes dépliés.

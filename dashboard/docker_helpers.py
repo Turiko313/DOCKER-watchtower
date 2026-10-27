@@ -34,7 +34,9 @@ def list_containers():
         for c in client.containers.list(all=True):
             try:
                 try:
-                    image_name = c.image.tags[0] if c.image.tags else c.image.short_id
+                    image_name = c.attrs.get("Config", {}).get("Image")
+                    if not image_name:
+                        image_name = c.image.tags[0] if c.image.tags else c.image.short_id
                 except Exception:
                     image_name = c.attrs.get("Config", {}).get("Image", "unknown")
                 wt_label = c.labels.get("com.centurylinklabs.watchtower.enable")
@@ -90,6 +92,46 @@ def list_containers():
 
     containers.sort(key=lambda x: x["name"])
     return containers
+
+def container_states(names):
+    """Read only the identity and lifecycle fields needed to verify a restart."""
+    client = get_docker_client()
+    states = []
+    for name in names:
+        container = client.containers.get(name)
+        state = container.attrs.get("State", {})
+        states.append({
+            "name": container.name,
+            "id": container.id,
+            "started_at": state.get("StartedAt", ""),
+            "status": state.get("Status", "unknown"),
+        })
+    return states
+
+
+def restart_containers(names):
+    """Restart exactly these names, checking the running state after each call."""
+    client = get_docker_client()
+    results = []
+    for name in names:
+        try:
+            container = client.containers.get(name)
+            previous_start = container.attrs.get("State", {}).get("StartedAt", "")
+            container.restart(timeout=10)
+            container.reload()
+            state = container.attrs.get("State", {})
+            if (state.get("Status") != "running" or not state.get("StartedAt")
+                    or state["StartedAt"] == previous_start):
+                results.append({"name": name, "status": "error",
+                                "message": "Redémarrage non confirmé : le conteneur doit être démarré avec une nouvelle date de lancement."})
+            else:
+                results.append({"name": name, "status": "success"})
+        except Exception:
+            logger.exception("Unable to restart container %s", name)
+            results.append({"name": name, "status": "error",
+                            "message": "Échec du redémarrage. Consultez les journaux Docker."})
+    return results
+
 
 def _watchtower_container(client):
     """Find this all-in-one container even when Compose renamed it."""

@@ -8,7 +8,7 @@ import secrets
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, url_for
 import requests as http_requests
 
-from docker_helpers import get_update_statuses, list_containers
+from docker_helpers import container_states, get_update_statuses, list_containers, restart_containers
 from settings import load_settings, save_settings
 from watchtower_api import (
     WATCHTOWER_API_TOKEN,
@@ -142,26 +142,33 @@ def dashboard():
     )
 
 
+def _resolve_action_targets(values):
+    unexpected = set(values) - {"csrf_token", "container", "image"}
+    selectors = [key for key in ("container", "image") if key in values]
+    if unexpected or len(selectors) != 1:
+        return None, (jsonify({"status": "error", "message": "Cible d'action invalide."}), 400)
+    selector = selectors[0]
+    targets = values.getlist(selector)
+    if len(targets) != 1 or not targets[0].strip():
+        return None, (jsonify({"status": "error", "message": "Cible d'action vide ou invalide."}), 400)
+    field = "name" if selector == "container" else "image"
+    containers = [c for c in list_containers() if c[field] == targets[0]]
+    if not containers:
+        return None, (jsonify({"status": "error", "message": "Conteneur ou groupe introuvable. Actualisez la page."}), 404)
+    return containers, None
+
+
 @app.route("/update", methods=["POST"])
 def trigger_update():
     params = {}
-    # Resolve targets from the current inventory. Never forward user-supplied
-    # patterns: Watchtower interprets container names as regular expressions.
+    # Never forward user-supplied patterns: Watchtower treats names as regexes.
     if request.data and not request.form:
         return jsonify({"status": "error", "message": "Format de requête invalide."}), 400
-    if set(request.form) - {"csrf_token"}:
-        unexpected = set(request.form) - {"csrf_token", "container", "image"}
-        selectors = [key for key in ("container", "image") if key in request.form]
-        if unexpected or len(selectors) != 1:
-            return jsonify({"status": "error", "message": "Cible de mise à jour invalide."}), 400
-        selector = selectors[0]
-        values = request.form.getlist(selector)
-        if len(values) != 1 or not values[0].strip():
-            return jsonify({"status": "error", "message": "Cible de mise à jour vide ou invalide."}), 400
-        field = "name" if selector == "container" else "image"
-        targets = [c for c in list_containers() if c[field] == values[0]]
-        if not targets:
-            return jsonify({"status": "error", "message": "Conteneur ou groupe introuvable. Actualisez la page."}), 404
+    targeted = bool(set(request.form) - {"csrf_token"})
+    if targeted:
+        targets, error = _resolve_action_targets(request.form)
+        if error:
+            return error
         names = [c["name"] for c in targets if c["watchtower_enabled"]]
         if not names:
             return jsonify({"status": "error", "message": "Watchtower est désactivé pour cette cible."}), 409
@@ -175,13 +182,15 @@ def trigger_update():
         )
         if response.status_code == 200:
             try:
-                summary = response.json().get("summary", {})
-                failed = int(summary.get("failed", 0))
-                updated = int(summary.get("updated", 0))
-                scanned = int(summary.get("scanned", 0))
-                skipped = int(summary.get("skipped", 0))
+                summary = response.json()["summary"]
+                counts = [summary[key] for key in ("failed", "updated", "scanned", "skipped")]
+                if any(type(count) is not int or count < 0 for count in counts):
+                    raise ValueError("Invalid counters")
+                failed, updated, scanned, skipped = counts
                 scan_failed = summary.get("scan_failed", False)
-            except (ValueError, TypeError, AttributeError):
+                if type(scan_failed) is not bool:
+                    raise ValueError("Invalid scan status")
+            except (KeyError, ValueError, TypeError, AttributeError):
                 return jsonify({"status": "error", "message": "Réponse Watchtower invalide."}), 502
             message = (
                 f"Vérification terminée : {scanned} vérifié(s), {updated} mis à jour, "
@@ -189,6 +198,8 @@ def trigger_update():
             )
             if failed or scan_failed:
                 return jsonify({"status": "error", "message": message + " Consultez les journaux Watchtower."}), 502
+            if targeted and scanned == 0:
+                return jsonify({"status": "error", "message": message + " Aucun conteneur vérifié. Vérifiez les labels et l'inclusion des conteneurs arrêtés dans Settings."}), 409
             return jsonify(
                 {"status": "success", "message": message}
             )
@@ -199,6 +210,8 @@ def trigger_update():
                 "message": f"Watchtower a repondu avec le code {response.status_code}.",
             }
         ), 502
+    except http_requests.Timeout:
+        return jsonify({"status": "error", "message": "Délai de réponse dépassé. La mise à jour peut encore être en cours : consultez les journaux Watchtower avant de relancer."}), 504
     except http_requests.RequestException:
         app.logger.exception("Unable to reach the Watchtower update API")
         return jsonify(
@@ -207,6 +220,43 @@ def trigger_update():
                 "message": "Impossible de contacter le service Watchtower.",
             }
         ), 502
+
+
+@app.route("/restart/status", methods=["GET"])
+def restart_status():
+    targets, error = _resolve_action_targets(request.args)
+    if error:
+        return error
+    try:
+        return jsonify({"status": "success", "containers": container_states([c["name"] for c in targets])})
+    except Exception:
+        app.logger.exception("Unable to read restart state")
+        return jsonify({"status": "error", "message": "Impossible de vérifier l'état des conteneurs."}), 502
+
+
+@app.route("/restart", methods=["POST"])
+def trigger_restart():
+    if request.data and not request.form:
+        return jsonify({"status": "error", "message": "Format de requête invalide."}), 400
+    targets, error = _resolve_action_targets(request.form)
+    if error:
+        return error
+    try:
+        # Restart the dashboard last so other group members finish before the
+        # connection closes. The browser verifies StartedAt on reconnection.
+        states = container_states([c["name"] for c in targets])
+        own_id = os.environ.get("HOSTNAME", "")
+        states.sort(key=lambda c: bool(own_id and c["id"].startswith(own_id)))
+        results = restart_containers([c["name"] for c in states])
+    except Exception:
+        app.logger.exception("Unable to contact Docker for restart")
+        return jsonify({"status": "error", "message": "Impossible de contacter Docker pour le redémarrage."}), 502
+    failed = [r for r in results if r["status"] != "success"]
+    status = "error" if failed else "success"
+    message = f"Redémarrage : {len(results) - len(failed)} réussi(s), {len(failed)} échec(s)."
+    if failed:
+        message += " " + " ; ".join(r["name"] + " : " + r["message"] for r in failed)
+    return jsonify({"status": status, "message": message, "results": results}), (502 if failed else 200)
 
 
 @app.route("/settings", methods=["GET", "POST"])

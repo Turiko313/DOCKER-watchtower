@@ -32,7 +32,7 @@ class FormParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         if tag == "form":
-            self.current = {}
+            self.current = {"action": attrs.get("action")}
             self.forms.append(self.current)
         elif tag == "input" and self.current is not None:
             self.current[attrs.get("name")] = attrs.get("value")
@@ -114,10 +114,39 @@ class TestManualUpdates(unittest.TestCase):
     def test_upstream_failures_are_reported(self):
         for summary in (dict(failed=1), dict(scan_failed=True)):
             with self.subTest(summary=summary):
-                self.post.return_value.json.return_value = {"summary": summary}
+                self.post.return_value.json.return_value = {
+                    "summary": dict(scanned=1, updated=0, failed=0, skipped=0) | summary}
                 response = self.update({"container": "app.one"})
                 self.assertEqual(response.status_code, 502)
                 self.assertEqual(response.json["status"], "error")
+
+    def test_invalid_summary_never_reports_success(self):
+        for summary in ({}, None, [], {"summary": {}},
+                        {"summary": dict(scanned=-1, updated=0, failed=0, skipped=0)},
+                        {"summary": dict(scanned=1, updated="1", failed=0, skipped=0)},
+                        {"summary": dict(scanned=True, updated=0, failed=0, skipped=0)},
+                        {"summary": dict(scanned=1, updated=0, failed=0, skipped=0, scan_failed="false")}):
+            with self.subTest(summary=summary):
+                self.post.return_value.json.return_value = summary
+                response = self.update({"container": "app.one"})
+                self.assertEqual(response.status_code, 502)
+                self.assertEqual(response.json["status"], "error")
+
+    def test_no_scanned_targets_is_not_a_success(self):
+        self.post.return_value.json.return_value = {
+            "summary": dict(scanned=0, updated=0, failed=0, skipped=1)}
+        self.assertEqual(self.update({"container": "app.one"}).status_code, 409)
+
+    def test_already_current_container_is_a_success(self):
+        self.post.return_value.json.return_value = {
+            "summary": dict(scanned=1, updated=0, failed=0, skipped=0)}
+        self.assertEqual(self.update({"container": "app.one"}).status_code, 200)
+
+    def test_update_timeout_reports_unknown_outcome(self):
+        self.post.side_effect = dashboard_app.http_requests.Timeout()
+        response = self.update({"container": "app.one"})
+        self.assertEqual(response.status_code, 504)
+        self.assertIn("peut encore être en cours", response.json["message"])
 
     def test_network_error_is_reported(self):
         self.post.side_effect = dashboard_app.http_requests.ConnectionError()
@@ -136,11 +165,15 @@ class TestManualUpdates(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         parser = FormParser()
         parser.feed(response.get_data(as_text=True))
-        targets = [f for f in parser.forms if "container" in f or "image" in f]
+        targets = [f for f in parser.forms if f["action"] == "/update" and ("container" in f or "image" in f)]
         self.assertEqual(len(targets), 5)
         self.assertTrue(all(f["csrf_token"] == dashboard_app.CSRF_TOKEN for f in targets))
         self.assertEqual([f["image"] for f in targets if "image" in f], ["example/app:latest"])
         self.assertEqual([f["container"] for f in targets if f["disabled"]], ["excluded"])
+        restarts = [f for f in parser.forms if f["action"] == "/restart"]
+        self.assertEqual(len(restarts), 5)
+        self.assertTrue(all(not f["disabled"] for f in restarts))
+        self.assertTrue(all(f["csrf_token"] == dashboard_app.CSRF_TOKEN for f in restarts))
 
 
 if __name__ == "__main__":
