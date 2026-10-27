@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0 — 2026-10-27
+
+- Bouton **Mettre à jour** au début de chaque ligne d'image ou de groupe, avec une action individuelle dans les groupes dépliés.
+- Ciblage des conteneurs par leurs noms exacts, protection contre les expressions régulières et refus des cibles vides ou inconnues. Les actions respectent les paramètres et exclusions Watchtower.
+- Affichage du bilan de vérification, des mises à jour, des conteneurs ignorés et des échecs; indicateur d'activité et boutons désactivés pendant la requête.
+- Rafraîchissement du tableau après l'action et conservation du fonctionnement des boutons après les actualisations automatiques; défilement horizontal du tableau sur les petits écrans.
+
+Validation locale : 66 tests réussis. Interactions vérifiées dans Chromium avec Docker et l'API Watchtower simulés : groupes, conteneurs individuels, exclusions, indicateur d'activité, rafraîchissement et largeur mobile. Aucune mise à jour de conteneur réel effectuée localement.
+
 ## 1.3.0 — 2026-10-23
 
 - Watchtower 1.23.2, épinglé au commit `cd5946be205ea0a60dd31235a11f04ac9851ebf6`; images de base Go 1.27.3 et Python 3.15.1 Alpine, avec digests vérifiés.

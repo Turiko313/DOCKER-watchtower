@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, url_for
@@ -143,15 +144,53 @@ def dashboard():
 
 @app.route("/update", methods=["POST"])
 def trigger_update():
+    params = {}
+    # Resolve targets from the current inventory. Never forward user-supplied
+    # patterns: Watchtower interprets container names as regular expressions.
+    if request.data and not request.form:
+        return jsonify({"status": "error", "message": "Format de requête invalide."}), 400
+    if set(request.form) - {"csrf_token"}:
+        unexpected = set(request.form) - {"csrf_token", "container", "image"}
+        selectors = [key for key in ("container", "image") if key in request.form]
+        if unexpected or len(selectors) != 1:
+            return jsonify({"status": "error", "message": "Cible de mise à jour invalide."}), 400
+        selector = selectors[0]
+        values = request.form.getlist(selector)
+        if len(values) != 1 or not values[0].strip():
+            return jsonify({"status": "error", "message": "Cible de mise à jour vide ou invalide."}), 400
+        field = "name" if selector == "container" else "image"
+        targets = [c for c in list_containers() if c[field] == values[0]]
+        if not targets:
+            return jsonify({"status": "error", "message": "Conteneur ou groupe introuvable. Actualisez la page."}), 404
+        names = [c["name"] for c in targets if c["watchtower_enabled"]]
+        if not names:
+            return jsonify({"status": "error", "message": "Watchtower est désactivé pour cette cible."}), 409
+        params["container"] = ",".join("^" + re.escape(name) + "$" for name in names)
     try:
         response = http_requests.post(
             f"{WATCHTOWER_API_URL}/v1/update",
             headers={"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"},
+            params=params,
             timeout=120,
         )
         if response.status_code == 200:
+            try:
+                summary = response.json().get("summary", {})
+                failed = int(summary.get("failed", 0))
+                updated = int(summary.get("updated", 0))
+                scanned = int(summary.get("scanned", 0))
+                skipped = int(summary.get("skipped", 0))
+                scan_failed = summary.get("scan_failed", False)
+            except (ValueError, TypeError, AttributeError):
+                return jsonify({"status": "error", "message": "Réponse Watchtower invalide."}), 502
+            message = (
+                f"Vérification terminée : {scanned} vérifié(s), {updated} mis à jour, "
+                f"{skipped} ignoré(s), {failed} échec(s)."
+            )
+            if failed or scan_failed:
+                return jsonify({"status": "error", "message": message + " Consultez les journaux Watchtower."}), 502
             return jsonify(
-                {"status": "success", "message": "Mise a jour declenchee avec succes."}
+                {"status": "success", "message": message}
             )
         app.logger.warning("Watchtower update API returned HTTP %s", response.status_code)
         return jsonify(

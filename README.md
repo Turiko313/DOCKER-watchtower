@@ -120,6 +120,18 @@ déclenche la demande d’identifiants HTTP Basic du navigateur.
 
 ## Paramètres Watchtower
 
+Dans le dashboard, le bouton **Mettre à jour** au début de chaque ligne lance
+une vérification et applique la nouvelle image si elle est disponible pour ce
+conteneur. Sur une ligne de groupe, il cible les conteneurs surveillés utilisant
+cette image. Dépliez le groupe pour mettre à jour un seul de ses conteneurs.
+Le bouton global **Vérifier maintenant** conserve la vérification générale.
+
+Les actions manuelles respectent les paramètres Watchtower : labels d'exclusion,
+sélection par label, inclusion des conteneurs arrêtés et mode surveillance
+uniquement. Les boutons des conteneurs explicitement exclus sont désactivés.
+Le bilan affiche les nombres de conteneurs vérifiés, mis à jour, ignorés et en
+échec. Le tableau s'actualise après la réponse.
+
 La page **Settings** gère :
 
 - la planification cron à six champs ou l’intervalle de vérification ;

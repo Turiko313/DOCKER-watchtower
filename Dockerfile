@@ -57,7 +57,7 @@ RUN chmod +x /usr/local/bin/start_watchtower.py
 
 LABEL org.opencontainers.image.source="https://github.com/Turiko313/DOCKER-watchtower" \
       org.opencontainers.image.description="Maintained Watchtower fork + secured dashboard" \
-      org.opencontainers.image.version="1.3.0"
+      org.opencontainers.image.version="1.4.0"
 
 EXPOSE 5000
 

@@ -1,5 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
+{% macro update_button(container=none, image=none, enabled=true) %}
+<form method="POST" action="{{ url_for('trigger_update') }}" class="target-update-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if container is not none %}
+  <input type="hidden" name="container" value="{{ container }}">
+  {% else %}
+  <input type="hidden" name="image" value="{{ image }}">
+  {% endif %}
+  <button type="submit" class="btn btn-primary btn-update" {% if not enabled %}disabled{% endif %}
+          title="{{ 'Mettre à jour ' ~ container if container is not none else 'Mettre à jour les conteneurs surveillés du groupe ' ~ image }}"
+          aria-label="{{ 'Mettre à jour ' ~ container if container is not none else 'Mettre à jour le groupe ' ~ image }}">
+    <span class="update-text">Mettre à jour</span>
+    <span class="spinner" style="display:none" aria-hidden="true"></span>
+  </button>
+</form>
+{% endmacro %}
 
 <!-- Metrics -->
 <div class="metrics">
@@ -56,6 +72,7 @@
 </div>
 
 <!-- Containers table -->
+<div id="updateResult" role="status" aria-live="polite" hidden></div>
 <div class="card">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
     <h2 style="margin-bottom:0">Conteneurs</h2>
@@ -65,9 +82,11 @@
       <button class="btn filter-btn" data-filter="stopped">Arrêtés</button>
     </div>
   </div>
+  <div class="table-scroll">
   <table>
     <thead>
       <tr>
+        <th>Action</th>
         <th>Nom</th>
         <th>Image</th>
         <th>Statut</th>
@@ -81,6 +100,7 @@
         {% if group|length == 1 %}
           {% set c = group[0] %}
           <tr data-status="{{ c.status }}">
+            <td>{{ update_button(container=c.name, enabled=c.watchtower_enabled) }}</td>
             <td><strong>{{ c.name }}</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
             <td>
@@ -113,6 +133,7 @@
           {% set running = group|selectattr('status','equalto','running')|list|length %}
           {% set stopped = group|length - running %}
           <tr class="group-header" data-group="{{ ns.gid }}" data-statuses="{{ group|map(attribute='status')|join(',') }}">
+            <td>{{ update_button(image=image, enabled=group|selectattr('watchtower_enabled')|list|length > 0) }}</td>
             <td><strong>▶ {{ group|length }} conteneurs</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ image }}</td>
             <td>
@@ -126,6 +147,7 @@
           </tr>
           {% for c in group %}
           <tr class="group-child" data-group="{{ ns.gid }}" data-status="{{ c.status }}" style="display:none">
+            <td>{{ update_button(container=c.name, enabled=c.watchtower_enabled) }}</td>
             <td style="padding-left:2rem">↳ <strong>{{ c.name }}</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
             <td>
@@ -158,6 +180,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 <script>
@@ -169,10 +192,11 @@ function bindEvents() {
     // remove fast clone
     var new_header = header.cloneNode(true);
     header.parentNode.replaceChild(new_header, header);
-    new_header.addEventListener('click', function() {
+    new_header.addEventListener('click', function(event) {
+      if (event.target.closest('form')) return;
       var gid = this.dataset.group;
       var rows = document.querySelectorAll('.group-child[data-group="' + gid + '"]');
-      var label = this.querySelector('td strong');
+      var label = this.querySelector('strong');
       var isOpen = this.dataset.open === '1';
       var activeBtn = document.querySelector('.filter-btn.active');
       var filter = activeBtn ? activeBtn.dataset.filter : 'all';
@@ -224,7 +248,7 @@ function bindEvents() {
         });
         
         if (isOpen) {
-          var label = header.querySelector('td strong');
+          var label = header.querySelector('strong');
           if (label) {
             var anyVisible = Array.from(document.querySelectorAll('.group-child[data-group="' + gid + '"]')).some(function(r) { return r.style.display !== 'none'; });
             label.textContent = label.textContent.replace(/[\u25b6\u25bc]/, anyVisible ? '\u25bc' : '\u25b6');
@@ -239,47 +263,67 @@ function bindEvents() {
 bindEvents();
 
 /* ASYNC UPDATE TRIGGER */
-var updateForm = document.getElementById('updateForm');
-if(updateForm) {
-  updateForm.addEventListener('submit', function(e) {
+var updateInProgress = false;
+document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (!form.matches('#updateForm, .target-update-form')) return;
     e.preventDefault();
-    if (!confirm('Lancer une verification de mises a jour ?')) return;
+    if (updateInProgress) return;
+    if (form.id === 'updateForm' && !confirm('Lancer une verification de mises a jour ?')) return;
 
-    var btn = document.getElementById('updateBtn');
-    var text = document.getElementById('updateText');
-    var spinner = document.getElementById('updateSpinner');
+    var btn = form.querySelector('button[type="submit"]');
+    var text = btn.querySelector('.update-text, #updateText');
+    var spinner = btn.querySelector('.spinner');
+    var originalText = text.textContent;
+    var result = document.getElementById('updateResult');
+    var body = new URLSearchParams(new FormData(form));
+    updateInProgress = true;
+    result.hidden = false;
+    result.className = 'flash';
+    result.textContent = 'Vérification et mise à jour en cours…';
+    document.querySelectorAll('#updateBtn, .btn-update').forEach(function(button) {
+      button.dataset.wasDisabled = button.disabled ? '1' : '0';
+      button.disabled = true;
+    });
 
     text.textContent = 'Verification en cours\u2026';
     spinner.style.display = 'inline-block';
-    btn.disabled = true;
-    btn.style.opacity = '0.7';
+    btn.setAttribute('aria-busy', 'true');
 
-    fetch(this.action, {
+    fetch(form.action, {
       method: 'POST',
-      headers: { 'X-CSRF-Token': CSRF_TOKEN }
+      headers: { 'X-CSRF-Token': CSRF_TOKEN },
+      body: body
     })
       .then(function(r) { return r.json(); })
       .then(function(res) {
-        alert(res.message);
+        result.className = 'flash ' + (res.status === 'success' ? 'success' : 'error');
+        result.textContent = res.message;
       })
       .catch(function(err) {
-        alert("Erreur lors de la communication.");
+        result.className = 'flash error';
+        result.textContent = 'Communication interrompue. La mise à jour peut encore être en cours : vérifiez les journaux Watchtower avant de relancer.';
       })
       .finally(function() {
-        text.textContent = 'Verifier maintenant';
+        text.textContent = originalText;
         spinner.style.display = 'none';
-        btn.disabled = false;
-        btn.style.opacity = '1.0';
+        btn.removeAttribute('aria-busy');
+        document.querySelectorAll('#updateBtn, .btn-update').forEach(function(button) {
+          button.disabled = button.dataset.wasDisabled === '1';
+          delete button.dataset.wasDisabled;
+        });
+        updateInProgress = false;
         if(window.refreshDashboard) window.refreshDashboard();
       });
-  });
-}
+});
 
 /* AUTO REFRESH DASHBOARD WITHOUT RELOAD */
 window.refreshDashboard = function() {
+  if (updateInProgress) return;
   fetch(window.location.href)
     .then(function(r) { return r.text(); })
     .then(function(html) {
+      if (updateInProgress) return;
       var parser = new DOMParser();
       var doc = parser.parseFromString(html, 'text/html');
       
