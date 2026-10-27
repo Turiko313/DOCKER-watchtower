@@ -1,0 +1,77 @@
+diff --git a/internal/api/routes/update.go b/internal/api/routes/update.go
+index 6d9b112..1b13839 100644
+--- a/internal/api/routes/update.go
++++ b/internal/api/routes/update.go
+@@ -37,4 +37,5 @@ func registerUpdateRoute(ctx context.Context, app *fiber.App, auth fiber.Handler
+ 	app.Post(handler.Path, auth, timeout.New(handler.Handle, timeout.Config{
+ 		Timeout: updateTimeout,
+ 	}))
++	registerManualUpdateRoute(ctx, app, auth, opts)
+ }
+diff --git a/pkg/container/client.go b/pkg/container/client.go
+index 7ed73f2..0b5a5ec 100644
+--- a/pkg/container/client.go
++++ b/pkg/container/client.go
+@@ -573,7 +573,12 @@ func negotiateDockerAPI(
+ func (c *client) ListContainers(ctx context.Context, filter ...types.Filter) ([]types.Container, error) {
+ 	// Podman has no restarting status, so the runtime only matters when
+ 	// restarting containers are included.
+-	isPodman := c.IncludeRestarting && c.getRuntime(ctx)
++	listOptions := c.ClientOptions
++	if types.IsManualUpdate(ctx) {
++		listOptions.IncludeStopped = true
++		listOptions.IncludeRestarting = true
++	}
++	isPodman := listOptions.IncludeRestarting && c.getRuntime(ctx)
+ 
+ 	var containerFilter types.Filter
+ 
+@@ -608,7 +613,7 @@ func (c *client) ListContainers(ctx context.Context, filter ...types.Filter) ([]
+ 		containers, err = listSourceContainers(c.logger(),
+ 			ctx,
+ 			c.api,
+-			c.ClientOptions,
++			listOptions,
+ 			containerFilter,
+ 			isPodman,
+ 		)
+diff --git a/pkg/container/metadata.go b/pkg/container/metadata.go
+index 7cdd084..d7ebd4d 100644
+--- a/pkg/container/metadata.go
++++ b/pkg/container/metadata.go
+@@ -335,6 +335,7 @@ func (c *Container) GetLabel(label string) (string, bool) {
+ // Returns:
+ //   - bool: True if monitor-only, false otherwise.
+ func (c *Container) IsMonitorOnly(params types.UpdateParams) bool {
++	if params.ManualUpdate { return false }
+ 	return c.getContainerOrGlobalBool(params.MonitorOnly, monitorOnlyLabel, params.LabelPrecedence)
+ }
+ 
+@@ -348,6 +349,7 @@ func (c *Container) IsMonitorOnly(params types.UpdateParams) bool {
+ // Returns:
+ //   - bool: True if no-pull, false otherwise.
+ func (c *Container) IsNoPull(params types.UpdateParams) bool {
++	if params.ManualUpdate { return params.NoPull }
+ 	return c.getContainerOrGlobalBool(params.NoPull, noPullLabel, params.LabelPrecedence)
+ }
+ 
+@@ -399,6 +401,7 @@ func (c *Container) IsGitWatch(params types.UpdateParams) bool {
+ // Returns:
+ //   - time.Duration: Effective cooldown delay for this container.
+ func (c *Container) CooldownDelay(params types.UpdateParams) time.Duration {
++	if params.ManualUpdate { return 0 }
+ 	labelVal, ok := c.getLabelValue(cooldownDelayLabel)
+ 	if !ok {
+ 		// No label set — use global value.
+diff --git a/pkg/types/update_params.go b/pkg/types/update_params.go
+index 917adc2..40201e9 100644
+--- a/pkg/types/update_params.go
++++ b/pkg/types/update_params.go
+@@ -8,6 +8,7 @@ import (
+ 
+ // UpdateParams defines options for the Update function.
+ type UpdateParams struct {
++	ManualUpdate bool `json:"-"` // Request-local dashboard manual update policy.
+ 	Filter              Filter                  `json:"-"`                      // Container filter.
+ 	Cleanup             bool                    `json:"cleanup"`                // Remove old images if true.
+ 	NoRestart           bool                    `json:"no_restart"`             // Skip restarts if true.

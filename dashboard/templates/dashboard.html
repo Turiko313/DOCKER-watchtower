@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-{% macro action_buttons(container=none, image=none, enabled=true) %}
+{% macro action_buttons(container=none, image=none) %}
 <div class="container-actions">
 {% for action, label, icon in [('update', 'Mettre à jour', '↓'), ('restart', 'Redémarrer', '↻')] %}
-{% set available = enabled or action == 'restart' %}
 {% set target = container if container is not none else image %}
 {% set target_label = target if container is not none else 'le groupe ' ~ target %}
 <form method="POST" action="{{ url_for('trigger_' ~ action) }}" class="target-action-form" data-action="{{ action }}"
@@ -14,9 +13,8 @@
   {% else %}
   <input type="hidden" name="image" value="{{ image }}">
   {% endif %}
-  <button type="submit" class="btn container-action btn-{{ action }}" {% if not available %}disabled{% endif %}
-          data-unavailable="{{ '0' if available else '1' }}"
-          title="{{ label ~ ' ' ~ target_label if available else 'Mise à jour exclue par le label Watchtower' }}"
+  <button type="submit" class="btn container-action btn-{{ action }}"
+          title="{{ label ~ ' ' ~ target_label }}"
           aria-label="{{ label ~ ' ' ~ target_label }}">
     <span class="action-icon" aria-hidden="true">{{ icon }}</span>
     <span class="action-text">{{ label }}</span>
@@ -75,7 +73,7 @@
     <form method="POST" action="{{ url_for('trigger_update') }}" id="updateForm" data-action="update"
           data-state-key="{{ ['update', 'all', '']|tojson|forceescape }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="btn container-action" id="updateBtn" data-unavailable="0" title="Vérifier tous les conteneurs surveillés" aria-label="Vérifier tous les conteneurs surveillés">
+      <button type="submit" class="btn container-action" id="updateBtn" title="Vérifier tous les conteneurs surveillés" aria-label="Vérifier tous les conteneurs surveillés">
         <span class="action-icon" aria-hidden="true">↓</span>
         <span class="action-text">Vérifier maintenant</span>
         <span class="action-outcome" aria-hidden="true" hidden></span>
@@ -114,7 +112,7 @@
         {% if group|length == 1 %}
           {% set c = group[0] %}
           <tr data-status="{{ c.status }}">
-            <td>{{ action_buttons(container=c.name, enabled=c.watchtower_enabled) }}</td>
+            <td>{{ action_buttons(container=c.name) }}</td>
             <td><strong>{{ c.name }}</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
             <td>
@@ -147,7 +145,7 @@
           {% set running = group|selectattr('status','equalto','running')|list|length %}
           {% set stopped = group|length - running %}
           <tr class="group-header" data-group="{{ ns.gid }}" data-image="{{ image }}" data-statuses="{{ group|map(attribute='status')|join(',') }}">
-            <td>{{ action_buttons(image=image, enabled=group|selectattr('watchtower_enabled')|list|length > 0) }}</td>
+            <td>{{ action_buttons(image=image) }}</td>
             <td><strong>▶ {{ group|length }} conteneurs</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ image }}</td>
             <td>
@@ -161,7 +159,7 @@
           </tr>
           {% for c in group %}
           <tr class="group-child" data-group="{{ ns.gid }}" data-status="{{ c.status }}" style="display:none">
-            <td>{{ action_buttons(container=c.name, enabled=c.watchtower_enabled) }}</td>
+            <td>{{ action_buttons(container=c.name) }}</td>
             <td style="padding-left:2rem">↳ <strong>{{ c.name }}</strong></td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.image }}</td>
             <td>
@@ -364,7 +362,7 @@ document.addEventListener('submit', async function(event) {
   if (!form.matches('#updateForm, .target-action-form')) return;
   event.preventDefault();
   var button = form.querySelector('button[type="submit"]');
-  if (actionInProgress || button.disabled) return;
+  if (actionInProgress) return;
   if (form.id === 'updateForm' && !confirm('Lancer une vérification de mises à jour ?')) return;
 
   var restarting = form.dataset.action === 'restart';
@@ -384,7 +382,7 @@ document.addEventListener('submit', async function(event) {
   delete actionResults[key];
   saveActionResults();
   applyActionResults();
-  document.querySelectorAll('.container-action').forEach(function(btn) { btn.disabled = true; });
+  document.querySelectorAll('.container-action').forEach(function(btn) { btn.setAttribute('aria-disabled', 'true'); });
   result.hidden = false;
   result.className = 'flash';
   result.textContent = restarting ? 'Redémarrage en cours…' : 'Vérification et mise à jour en cours…';
@@ -426,7 +424,7 @@ document.addEventListener('submit', async function(event) {
     spinner.style.display = 'none';
     button.removeAttribute('aria-busy');
     document.querySelectorAll('.container-action').forEach(function(btn) {
-      btn.disabled = btn.dataset.unavailable === '1';
+      btn.removeAttribute('aria-disabled');
     });
     actionInProgress = false;
     applyActionResults();

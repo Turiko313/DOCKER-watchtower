@@ -169,13 +169,11 @@ def trigger_update():
         targets, error = _resolve_action_targets(request.form)
         if error:
             return error
-        names = [c["name"] for c in targets if c["watchtower_enabled"]]
-        if not names:
-            return jsonify({"status": "error", "message": "Watchtower est désactivé pour cette cible."}), 409
+        names = [c["name"] for c in targets]
         params["container"] = ",".join("^" + re.escape(name) + "$" for name in names)
     try:
         response = http_requests.post(
-            f"{WATCHTOWER_API_URL}/v1/update",
+            f"{WATCHTOWER_API_URL}/v1/{'manual-update' if targeted else 'update'}",
             headers={"Authorization": f"Bearer {WATCHTOWER_API_TOKEN}"},
             params=params,
             timeout=120,
@@ -198,8 +196,8 @@ def trigger_update():
             )
             if failed or scan_failed:
                 return jsonify({"status": "error", "message": message + " Consultez les journaux Watchtower."}), 502
-            if targeted and scanned == 0:
-                return jsonify({"status": "error", "message": message + " Aucun conteneur vérifié. Vérifiez les labels et l'inclusion des conteneurs arrêtés dans Settings."}), 409
+            if targeted and (scanned == 0 or skipped > 0):
+                return jsonify({"status": "error", "message": message + " La mise à jour de toutes les cibles n'a pas pu être confirmée. Consultez les journaux."}), 409
             return jsonify(
                 {"status": "success", "message": message}
             )

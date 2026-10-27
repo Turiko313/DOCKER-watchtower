@@ -1,0 +1,2 @@
+watchtower/*.patch text eol=lf -whitespace
+watchtower/overlay/**/*.go text eol=lf

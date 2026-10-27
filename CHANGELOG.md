@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.1 — 2026-10-27
+
+- Le bouton **Mettre à jour** reste disponible et ne dépend plus de l'indicateur Watchtower, y compris pour les groupes entièrement exclus de la surveillance automatique. Les boutons ne sont plus grisés pendant une action; les clics supplémentaires restent bloqués.
+- L'action manuelle cible tous les conteneurs sélectionnés et ignore les exclusions automatiques, les labels de surveillance seule et le mode surveillance global. Les labels et la configuration automatique ne sont pas modifiés. Les conteneurs arrêtés peuvent être mis à jour en conservant leur état arrêté.
+- Extension locale du moteur Watchtower épinglé : endpoint manuel authentifié et limité à une cible, politique isolée par requête et verrou partagé avec les mises à jour planifiées. Tests Go exécutés pendant la construction.
+- Contrôle CI d'une vraie mise à jour d'image sur un conteneur jetable avec `enable=false` et `monitor-only=true`, puis vérification que ses labels, son exclusion automatique et le conteneur voisin sont conservés.
+
+Validation locale : 85 tests Python et tests navigateur réussis, avec API simulées. Validation du moteur Go et du remplacement Docker réel confiée à la CI.
+
 ## 1.5.0 — 2026-10-27
 
 - Bouton **Redémarrer** à côté de **Mettre à jour**, pour un conteneur ou un groupe complet. Le redémarrage utilise directement l'API Docker et reste disponible pour les conteneurs exclus des mises à jour Watchtower.

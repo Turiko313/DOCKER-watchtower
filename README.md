@@ -12,6 +12,9 @@ Image tout-en-un pour mettre à jour des conteneurs Docker avec :
 L’ancien projet `containrrr/watchtower` est archivé. Cette image compile le fork
 maintenu depuis son commit immuable
 `cd5946be205ea0a60dd31235a11f04ac9851ebf6`.
+Un correctif local versionné dans `watchtower/` ajoute une action manuelle
+indépendante de la sélection automatique, avec le même moteur et le même verrou
+de mise à jour. Ses tests Go sont exécutés pendant la construction de l'image.
 
 ## Installation
 
@@ -123,12 +126,16 @@ déclenche la demande d’identifiants HTTP Basic du navigateur.
 Dans le dashboard, le bouton **Mettre à jour** au début de chaque ligne lance
 une vérification et applique la nouvelle image si elle est disponible pour ce
 conteneur. Sur une ligne de groupe, il cible les conteneurs surveillés utilisant
-cette image. Dépliez le groupe pour mettre à jour un seul de ses conteneurs.
+cette image, y compris ceux exclus de la surveillance automatique. Dépliez le
+groupe pour mettre à jour un seul de ses conteneurs.
 Le bouton global **Vérifier maintenant** conserve la vérification générale.
 
-Les actions manuelles respectent les paramètres Watchtower : labels d'exclusion,
-sélection par label, inclusion des conteneurs arrêtés et mode surveillance
-uniquement. Les boutons des conteneurs explicitement exclus sont désactivés.
+Le bouton **Mettre à jour** est indépendant de la colonne **Watchtower** et
+reste disponible pour chaque conteneur ou groupe. L'action manuelle ignore la
+sélection automatique par labels et le mode surveillance uniquement, sans
+modifier les labels ni la planification. Les conteneurs arrêtés peuvent être
+mis à jour et restent arrêtés. La politique explicite de téléchargement local
+(`WATCHTOWER_NO_PULL`) et les identifiants des registres restent applicables.
 Le bilan affiche les nombres de conteneurs vérifiés, mis à jour, ignorés et en
 échec. Le tableau s'actualise après la réponse.
 
@@ -145,7 +152,8 @@ Les boutons d'action sont **bleus** au repos. Une action confirmée les passe en
 résultat non confirmé les passe en **rouge jusqu'à une nouvelle tentative**.
 Un symbole complète la couleur. Ces états sont conservés lors des actualisations
 automatiques et des rechargements, dans la session de l'onglet. Pendant une action,
-les boutons sont désactivés pour éviter les doubles clics.
+les boutons conservent leur couleur; les clics supplémentaires sont ignorés pour
+éviter les doublons.
 
 Lors du redémarrage du dashboard lui-même, la connexion peut être interrompue.
 Le navigateur attend son retour et vérifie les dates de lancement des conteneurs

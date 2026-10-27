@@ -13,7 +13,17 @@ RUN git clone --branch "${WATCHTOWER_VERSION}" --depth 1 \
         https://github.com/nicholas-fedor/watchtower.git . \
     && test "$(git rev-parse HEAD)" = "${WATCHTOWER_COMMIT}" \
     && test "$(git describe --tags --exact-match)" = "${WATCHTOWER_VERSION}" \
-    && go mod verify \
+    && go mod verify
+
+# Request-local manual update policy; automatic Watchtower behavior is unchanged.
+COPY watchtower/overlay/ ./
+COPY watchtower/manual-update.patch /tmp/manual-update.patch
+RUN git apply --check /tmp/manual-update.patch \
+    && git apply /tmp/manual-update.patch \
+    && gofmt -w internal/api/routes/manual_update.go internal/api/routes/manual_update_test.go \
+        pkg/types/manual_update.go pkg/types/update_params.go \
+        pkg/container/manual_update_test.go pkg/container/metadata.go pkg/container/client.go \
+    && CGO_ENABLED=0 go test ./internal/api/routes ./pkg/container ./pkg/types \
     && CGO_ENABLED=0 go build \
         -trimpath \
         -buildvcs=false \
@@ -57,7 +67,7 @@ RUN chmod +x /usr/local/bin/start_watchtower.py
 
 LABEL org.opencontainers.image.source="https://github.com/Turiko313/DOCKER-watchtower" \
       org.opencontainers.image.description="Maintained Watchtower fork + secured dashboard" \
-      org.opencontainers.image.version="1.5.0"
+      org.opencontainers.image.version="1.5.1"
 
 EXPOSE 5000
 

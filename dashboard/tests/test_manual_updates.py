@@ -70,18 +70,20 @@ class TestManualUpdates(unittest.TestCase):
         response = self.update({"container": "app.one"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.post.call_args.kwargs["params"], {"container": r"^app\.one$"})
+        self.assertTrue(self.post.call_args.args[0].endswith("/v1/manual-update"))
         self.assertIn("1 mis à jour", response.json["message"])
 
-    def test_group_targets_only_monitored_members(self):
+    def test_group_targets_all_members_independently_of_watchtower(self):
         response = self.update({"image": "example/app:latest"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.post.call_args.kwargs["params"],
-                         {"container": r"^app\.one$,^app\-two$"})
+                         {"container": r"^app\.one$,^app\-two$,^excluded$"})
 
     def test_global_update_accepts_csrf_form_without_filter(self):
         response = self.update({"csrf_token": dashboard_app.CSRF_TOKEN})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.post.call_args.kwargs["params"], {})
+        self.assertTrue(self.post.call_args.args[0].endswith("/v1/update"))
 
     def test_global_update_accepts_original_empty_body(self):
         self.assertEqual(self.update({}).status_code, 200)
@@ -95,9 +97,10 @@ class TestManualUpdates(unittest.TestCase):
                 self.assertIn(self.update(data).status_code, (400, 404))
         self.post.assert_not_called()
 
-    def test_disabled_container_is_rejected(self):
-        self.assertEqual(self.update({"container": "excluded"}).status_code, 409)
-        self.post.assert_not_called()
+    def test_watchtower_excluded_container_can_be_updated_manually(self):
+        self.assertEqual(self.update({"container": "excluded"}).status_code, 200)
+        self.assertEqual(self.post.call_args.kwargs["params"], {"container": "^excluded$"})
+        self.assertTrue(self.post.call_args.args[0].endswith("/v1/manual-update"))
 
     def test_json_payload_is_rejected_without_upstream_request(self):
         response = self.client.post("/update", headers=self.headers, json={"container": "app.one"})
@@ -142,6 +145,11 @@ class TestManualUpdates(unittest.TestCase):
             "summary": dict(scanned=1, updated=0, failed=0, skipped=0)}
         self.assertEqual(self.update({"container": "app.one"}).status_code, 200)
 
+    def test_partially_skipped_manual_update_is_not_a_success(self):
+        self.post.return_value.json.return_value = {
+            "summary": dict(scanned=1, updated=0, failed=0, skipped=1)}
+        self.assertEqual(self.update({"container": "app.one"}).status_code, 409)
+
     def test_update_timeout_reports_unknown_outcome(self):
         self.post.side_effect = dashboard_app.http_requests.Timeout()
         response = self.update({"container": "app.one"})
@@ -160,7 +168,9 @@ class TestManualUpdates(unittest.TestCase):
 
     @patch.object(dashboard_app, "get_update_statuses", return_value={})
     @patch.object(dashboard_app, "get_watchtower_metrics", return_value={})
-    def test_dashboard_renders_group_individual_and_disabled_buttons(self, *_mocks):
+    def test_dashboard_renders_all_manual_buttons_enabled(self, *_mocks):
+        for item in self.inventory:
+            item["watchtower_enabled"] = False
         response = self.client.get("/", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         parser = FormParser()
@@ -169,7 +179,7 @@ class TestManualUpdates(unittest.TestCase):
         self.assertEqual(len(targets), 5)
         self.assertTrue(all(f["csrf_token"] == dashboard_app.CSRF_TOKEN for f in targets))
         self.assertEqual([f["image"] for f in targets if "image" in f], ["example/app:latest"])
-        self.assertEqual([f["container"] for f in targets if f["disabled"]], ["excluded"])
+        self.assertTrue(all(not f["disabled"] for f in targets))
         restarts = [f for f in parser.forms if f["action"] == "/restart"]
         self.assertEqual(len(restarts), 5)
         self.assertTrue(all(not f["disabled"] for f in restarts))

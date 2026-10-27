@@ -79,13 +79,21 @@ def run(browser_executable=None):
             expect(page.locator(".btn-restart")).to_have_count(5)
             expect(group_update).to_have_css("background-color", "rgb(31, 111, 235)")
             expect(group_restart).to_have_css("background-color", "rgb(31, 111, 235)")
-            expect(button("update", "excluded")).to_be_disabled()
+            expect(button("update", "excluded")).to_be_enabled()
             expect(button("restart", "excluded")).to_be_enabled()
 
-            group_update.click()
-            expect(group_restart).to_be_disabled()
+            page.locator(".group-header strong").click()
+            button("update", "excluded").click()
             settled()
-            assert update_calls == [{"container": r"^app\.one$,^app\-two$"}], update_calls
+            assert update_calls == [{"container": "^excluded$"}], update_calls
+            update_calls.clear()
+            page.locator(".group-header strong").click()
+            group_update.click()
+            expect(group_restart).to_have_attribute("aria-disabled", "true")
+            expect(group_update).to_have_css("opacity", "1")
+            expect(group_restart).to_have_css("opacity", "1")
+            settled()
+            assert update_calls == [{"container": r"^app\.one$,^app\-two$,^excluded$"}], update_calls
             expect(page.locator(".group-header")).to_have_attribute("data-open", "0")
             expect(group_update).to_have_attribute("data-result", "success")
             expect(group_update).to_have_css("background-color", "rgb(35, 134, 54)")
@@ -123,7 +131,7 @@ def run(browser_executable=None):
             settled()
             assert restart_calls[-1] == ["excluded"], restart_calls
             expect(button("restart", "excluded")).to_have_attribute("data-result", "success")
-            expect(button("update", "excluded")).to_be_disabled()
+            expect(button("update", "excluded")).to_be_enabled()
             group_restart.click()
             settled()
             assert restart_calls[-1] == ["app.one", "app-two", "excluded"], restart_calls
