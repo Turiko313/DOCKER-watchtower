@@ -167,6 +167,7 @@ class TestManualUpdates(unittest.TestCase):
             self.assertEqual(self.update({"container": "app.one"}).status_code, 502)
 
     @patch.object(dashboard_app, "get_update_statuses", return_value={})
+    @patch.object(dashboard_app, "get_watched_containers", return_value={})
     @patch.object(dashboard_app, "get_watchtower_metrics", return_value={})
     def test_dashboard_renders_all_manual_buttons_enabled(self, *_mocks):
         for item in self.inventory:

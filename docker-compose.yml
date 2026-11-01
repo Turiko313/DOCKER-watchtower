@@ -16,7 +16,7 @@ services:
     environment:
       - TZ=${TZ:-Europe/Paris}
       # Watchtower API
-      - WATCHTOWER_HTTP_API_ENDPOINTS=update,metrics
+      - WATCHTOWER_HTTP_API_ENDPOINTS=update,metrics,containers
       - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
       - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_API_TOKEN:?WATCHTOWER_API_TOKEN obligatoire}
       # Dashboard

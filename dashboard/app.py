@@ -13,6 +13,7 @@ from settings import load_settings, save_settings
 from watchtower_api import (
     WATCHTOWER_API_TOKEN,
     WATCHTOWER_API_URL,
+    get_watched_containers,
     get_watchtower_metrics,
     reset_metrics,
     restart_watchtower,
@@ -63,10 +64,10 @@ def _check_auth(auth):
     if not auth:
         return False
     username_matches = secrets.compare_digest(
-        auth.username or "", DASHBOARD_USERNAME
+        (auth.username or "").encode("utf-8"), DASHBOARD_USERNAME.encode("utf-8")
     )
     password_matches = secrets.compare_digest(
-        auth.password or "", DASHBOARD_PASSWORD
+        (auth.password or "").encode("utf-8"), DASHBOARD_PASSWORD.encode("utf-8")
     )
     return username_matches & password_matches
 
@@ -84,7 +85,7 @@ def _auth_failed_response():
 
 def _csrf_valid():
     token = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
-    return bool(token and secrets.compare_digest(token, CSRF_TOKEN))
+    return bool(token and secrets.compare_digest(token.encode("utf-8"), CSRF_TOKEN.encode("ascii")))
 
 
 @app.before_request
@@ -128,6 +129,12 @@ def _inject_security_context():
 @app.route("/")
 def dashboard():
     containers = list_containers()
+    watched = get_watched_containers()
+    for container in containers:
+        detail = watched.get(container["name"], {}) if watched is not None else {}
+        container["watchtower_enabled"] = detail.get("enabled", False) if watched is not None else None
+        container["watchtower_monitor_only"] = detail.get("monitor_only", False)
+        container["watchtower_no_pull"] = detail.get("no_pull", False)
     metrics = get_watchtower_metrics()
     update_statuses = get_update_statuses()
     grouped = {}
@@ -139,6 +146,7 @@ def dashboard():
         metrics=metrics,
         update_statuses=update_statuses,
         grouped=grouped,
+        watchtower_available=watched is not None,
     )
 
 
@@ -280,7 +288,7 @@ def settings():
 @app.route("/reset_metrics", methods=["POST"])
 def reset_metrics_route():
     reset_metrics()
-    flash("Metriques reinitialisees.", "success")
+    flash("Compteurs de scans réinitialisés. Le bilan du dernier scan est conservé.", "success")
     return redirect(url_for("settings"))
 
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.2 — 2026-11-01
+
+- Colonne Watchtower fondée sur la sélection du moteur actif, avec modes automatique, surveillance seule, exclusion et indisponibilité ; bilan des groupes et indication du mode image locale.
+- Résultats des dernières 24 heures visibles aussi pour les conteneurs exclus ; lecture des journaux JSON et des confirmations explicites de mise à jour.
+- Correction des jauges du dernier scan, du double comptage des échecs et des écritures concurrentes de l'historique des métriques.
+- Validation des valeurs et macros cron dans le formulaire et repli sur l'intervalle pour une ancienne configuration invalide.
+- Prise en charge des caractères Unicode dans les identifiants HTTP Basic et rejet propre des jetons CSRF Unicode invalides.
+- Contrôle CI de l'API de sélection ajouté au test de l'image. Tests navigateur étendus aux modes, groupes, pannes et retours du moteur.
+
+Validation locale : 108 tests Python, parcours Chrome avec API simulées, audit des dépendances, validation Compose et applicabilité du patch Go réussis. Construction Alpine, tests Go et actions sur des conteneurs réels non exécutés localement : moteur Docker inactif et Go absent.
+
 ## 1.5.1 — 2026-10-27
 
 - Le bouton **Mettre à jour** reste disponible et ne dépend plus de l'indicateur Watchtower, y compris pour les groupes entièrement exclus de la surveillance automatique. Les boutons ne sont plus grisés pendant une action; les clics supplémentaires restent bloqués.

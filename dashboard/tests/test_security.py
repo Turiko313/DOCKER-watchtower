@@ -40,7 +40,25 @@ class TestDashboardSecurity(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
 
+    def test_unicode_credentials_are_supported_without_server_error(self):
+        with (
+            patch.object(dashboard_app, "DASHBOARD_USERNAME", "franck-é"),
+            patch.object(dashboard_app, "DASHBOARD_PASSWORD", "mot-de-passe-é"),
+            patch.object(dashboard_app, "load_settings", return_value=__import__("settings").DEFAULTS.copy()),
+        ):
+            response = self.client.get("/settings", headers=_basic_auth("franck-é", "mot-de-passe-é"))
+            self.assertEqual(response.status_code, 200)
+            response = self.client.get("/settings", headers=_basic_auth("franck-é", "incorrect-é"))
+            self.assertEqual(response.status_code, 401)
+
+    def test_unicode_csrf_is_rejected_without_server_error(self):
+        response = self.client.post("/reset_metrics", headers={
+            **_basic_auth(), "X-CSRF-Token": "invalide-é",
+        })
+        self.assertEqual(response.status_code, 403)
+
     @patch.object(dashboard_app, "get_update_statuses", return_value={})
+    @patch.object(dashboard_app, "get_watched_containers", return_value={})
     @patch.object(dashboard_app, "get_watchtower_metrics", return_value={})
     @patch.object(dashboard_app, "list_containers", return_value=[])
     def test_authenticated_dashboard_has_security_headers(self, *_mocks):

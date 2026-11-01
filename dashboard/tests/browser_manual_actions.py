@@ -24,7 +24,10 @@ def run(browser_executable=None):
     states = {c["name"]: dict(name=c["name"], id="id-" + c["name"],
                              started_at="before", status="running") for c in inventory}
     update_calls, restart_calls = [], []
-    mode = {"update_failure": False}
+    mode = {"update_failure": False, "selection_unavailable": False}
+    selection = {
+        c["name"]: dict(enabled=True, monitor_only=c["name"] == "app-two", no_pull=False)
+        for c in inventory if c["watchtower_enabled"]}
 
     def update(*_args, **kwargs):
         update_calls.append(kwargs["params"])
@@ -42,6 +45,8 @@ def run(browser_executable=None):
         return [dict(name=name, status="success") for name in names]
 
     patches = [patch.object(dashboard_app, "list_containers", return_value=inventory),
+               patch.object(dashboard_app, "get_watched_containers", side_effect=lambda:
+                   None if mode["selection_unavailable"] else selection),
                patch.object(dashboard_app, "get_watchtower_metrics", return_value={}),
                patch.object(dashboard_app, "get_update_statuses", return_value={}),
                patch.object(dashboard_app.http_requests, "post", side_effect=update),
@@ -72,6 +77,8 @@ def run(browser_executable=None):
             def settled():
                 page.wait_for_function("() => !window.actionInProgress")
                 page.wait_for_load_state("networkidle")
+                # Color checks below assert the resting state, not :hover.
+                page.mouse.move(0, 0)
 
             group_update = button("update", "example/app:latest")
             group_restart = button("restart", "example/app:latest")
@@ -83,6 +90,10 @@ def run(browser_executable=None):
             expect(button("restart", "excluded")).to_be_enabled()
 
             page.locator(".group-header strong").click()
+            expect(page.locator('.group-header td').nth(4)).to_contain_text("2/3 surveillés")
+            expect(page.locator('.group-child').filter(has_text="app.one").locator('td').nth(4)).to_have_text("automatique")
+            expect(page.locator('.group-child').filter(has_text="app-two").locator('td').nth(4)).to_have_text("surveillance seule")
+            expect(page.locator('.group-child').filter(has_text="excluded").locator('td').nth(4)).to_have_text("non")
             button("update", "excluded").click()
             settled()
             assert update_calls == [{"container": "^excluded$"}], update_calls
@@ -164,6 +175,18 @@ def run(browser_executable=None):
             expect(button("update", "solo")).to_have_attribute("data-result", "error")
             page.unroute("**/update")
 
+            # Runtime selection and outages must survive partial refreshes.
+            mode["selection_unavailable"] = True
+            page.evaluate("() => window.refreshDashboard()")
+            settled()
+            expect(page.locator('.group-header td').nth(4)).to_have_text("indisponible")
+            expect(page.locator('.metric-card').filter(has_text="Surveillés").locator('.value')).to_have_text("?")
+            mode["selection_unavailable"] = False
+            selection["excluded"] = dict(enabled=True, monitor_only=False, no_pull=False)
+            page.evaluate("() => window.refreshDashboard()")
+            settled()
+            expect(page.locator('.group-header td').nth(4)).to_contain_text("3/3 surveillés")
+
             screenshot = Path(tempfile.gettempdir()) / "watchtower-container-actions.png"
             page.screenshot(path=str(screenshot), full_page=True)
             page.set_viewport_size(dict(width=390, height=844))
@@ -173,7 +196,8 @@ def run(browser_executable=None):
             expect(group_restart).to_be_visible()
             assert not errors, errors
             print("Browser checks passed: scoped actions, colors, 120-second expiry, persistent errors, "
-                  "refresh/reload, retry, reconnect without duplicate restart, HTTP errors, mobile.")
+                  "refresh/reload, retry, reconnect without duplicate restart, HTTP errors, "
+                  "Watchtower modes/groups/outages/recovery, mobile.")
             print(f"Screenshot: {screenshot}")
             browser.close()
     finally:

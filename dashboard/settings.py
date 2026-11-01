@@ -26,6 +26,56 @@ DEFAULTS = {
     "nextcloud_post_update_commands": "",
 }
 
+
+def valid_schedule(schedule):
+    """Validate the six-field cron syntax and descriptors offered by the UI."""
+    if len(schedule) > 1024:
+        return False
+    if not schedule:
+        return True
+    if schedule in {"@yearly", "@annually", "@monthly", "@weekly", "@daily", "@midnight", "@hourly"}:
+        return True
+    if schedule.startswith("@every "):
+        duration = schedule[7:]
+        number = r"(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+        parts = re.findall(rf"({number})(ns|us|µs|μs|ms|s|m|h)", duration)
+        if not parts or "".join(value + unit for value, unit in parts) != duration:
+            return False
+        units = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "μs": 1e-6,
+                 "ms": 1e-3, "s": 1, "m": 60, "h": 3600}
+        seconds = sum(float(value) * units[unit] for value, unit in parts)
+        return 0 < seconds < 9223372036
+
+    fields = schedule.split()
+    if len(fields) != 6:
+        return False
+    months = {name: index for index, name in enumerate(
+        ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+    days = {name: index for index, name in enumerate(("sun", "mon", "tue", "wed", "thu", "fri", "sat"))}
+    bounds = ((0, 59, {}), (0, 59, {}), (0, 23, {}), (1, 31, {}), (1, 12, months), (0, 6, days))
+    for field, (minimum, maximum, names) in zip(fields, bounds):
+        for expression in field.split(","):
+            match = re.fullmatch(r"([^/]+)(?:/([+]?[0-9]+))?", expression)
+            if not match or (match[2] is not None and not 0 < int(match[2]) <= 2**63 - 1):
+                return False
+            base = match[1]
+            if base in {"*", "?"}:
+                continue
+            values = base.lower().split("-")
+            if len(values) > 2:
+                return False
+            parsed = []
+            for value in values:
+                if value in names:
+                    parsed.append(names[value])
+                elif re.fullmatch(r"[+]?[0-9]+", value):
+                    parsed.append(int(value))
+                else:
+                    return False
+            if not all(minimum <= value <= maximum for value in parsed) or parsed[0] > parsed[-1]:
+                return False
+    return True
+
 def load_settings():
     settings = dict(DEFAULTS)
     try:
@@ -80,12 +130,10 @@ def save_settings(form):
         log_level = "info"
 
     # Validation du format Cron (Watchtower exige 6 champs ou des macros type @daily)
-    schedule = form.get("schedule", "").strip()
-    if schedule and not schedule.startswith("@"):
-        parts = schedule.split()
-        if len(parts) != 6:
-            errors.append("Le format cron est invalide. Il doit contenir exactement 6 champs. La planification cron a ete desactivee.")
-            schedule = ""
+    schedule = " ".join(form.get("schedule", "").split())
+    if not valid_schedule(schedule):
+        errors.append("Le format cron est invalide : utilisez 6 champs avec des valeurs valides ou une macro reconnue. La planification cron a ete desactivee.")
+        schedule = ""
 
     submitted_webhook = form.get("discord_webhook_url", "").strip()
     if submitted_webhook:

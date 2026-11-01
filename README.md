@@ -123,6 +123,28 @@ déclenche la demande d’identifiants HTTP Basic du navigateur.
 
 ## Paramètres Watchtower
 
+La colonne **Watchtower** lit la sélection du moteur en cours d'exécution via
+son API authentifiée `/v1/containers/details`. Elle tient ainsi compte des
+labels, des filtres, des scopes et de l'inclusion des conteneurs arrêtés :
+
+- **automatique** : conteneur sélectionné pour les mises à jour automatiques ;
+- **surveillance seule** : vérification des images sans mise à jour automatique ;
+- **non** : conteneur exclu de la sélection actuelle ;
+- **indisponible** : sélection impossible à vérifier, par exemple pendant un redémarrage du moteur.
+
+Le badge **image locale** signale le mode sans téléchargement. Les groupes
+affichent le nombre de conteneurs surveillés et la répartition des modes.
+Les résultats **mis à jour ✓** et **échec ✗** proviennent des journaux des
+dernières 24 heures et restent visibles après une action manuelle sur un
+conteneur exclu. Une détection d'image ou un bilan ambigu ne confirme pas une
+mise à jour. Les formats de journaux logfmt et JSON sont pris en charge.
+
+Les cartes **Mis à jour** et **Échecs** décrivent le **dernier scan** : les
+métriques correspondantes sont des jauges, pas des compteurs cumulés. Les
+scans effectués et ignorés restent cumulés et persistés. Leur remise à zéro
+ne modifie pas le bilan du dernier scan. Les écritures de l'historique sont
+verrouillées entre les threads et les workers Gunicorn sous Linux.
+
 Dans le dashboard, le bouton **Mettre à jour** au début de chaque ligne lance
 une vérification et applique la nouvelle image si elle est disponible pour ce
 conteneur. Sur une ligne de groupe, il cible tous les conteneurs utilisant
@@ -377,3 +399,4 @@ uv pip compile dashboard/requirements.in --python-version 3.15 \
 | Package GHCR privé en `denied` | Configurer un PAT classic `read:packages` dans `GHCR_USERNAME`/`GHCR_TOKEN` |
 | Dashboard inaccessible depuis le LAN | Vérifier `DASHBOARD_BIND_ADDRESS`, le port et le pare-feu |
 | Paramètres non persistés | Vérifier le volume Docker `watchtower_config` |
+| Colonne Watchtower « indisponible » | Vérifier les journaux et le processus Watchtower ; le lanceur active automatiquement l'endpoint `containers`, y compris avec un ancien fichier Compose |

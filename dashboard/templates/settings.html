@@ -14,7 +14,8 @@
       <input type="text" id="schedule" name="schedule" value="{{ settings.schedule }}"
              placeholder="Ex: 0 0 4 * * * (tous les jours à 4h)">
       <div style="font-size: 0.8rem; color: #8b949e; margin-top: 0.25rem;">
-        Note: Watchtower requiert un format cron à 6 champs (Secondes Minutes Heures Jours Mois JoursSemaine).
+        Format à 6 champs (Secondes Minutes Heures Jours Mois JoursSemaine), avec valeurs, listes,
+        plages ou pas valides. Les macros telles que <code>@daily</code> et <code>@every 1h30m</code> sont acceptées.
       </div>
     </div>
 
@@ -125,9 +126,9 @@
   </form>
 
   <form method="POST" action="{{ url_for('reset_metrics_route') }}" style="margin-top:.75rem"
-        onsubmit="return confirm('Etes-vous sur de vouloir remettre les metriques a zero ?');">
+        onsubmit="return confirm('Remettre les compteurs de scans à zéro ? Le bilan du dernier scan est conservé.');">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit" class="btn btn-danger">Remise a zero metriques</button>
+    <button type="submit" class="btn btn-danger">Remise à zéro des compteurs de scans</button>
   </form>
 </div>
 

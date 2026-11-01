@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -123,6 +124,32 @@ class TestUpdateStatuses(unittest.TestCase):
             '"GET / HTTP/1.1" 401 24 "-" "probe Creating /nextcloud"'
         )
 
+        self.assertEqual(docker_helpers._parse_update_statuses(logs), {})
+
+    def test_reads_zerolog_json_format(self):
+        logs = "\n".join(json.dumps(record) for record in (
+            dict(level="info", message="Found new image", container="/app"),
+            dict(level="info", message="Update session completed", updated=1, failed=0),
+            dict(level="error", message="Failed to stop container", container="/other"),
+        ))
+        self.assertEqual(docker_helpers._parse_update_statuses(logs),
+                         {"app": "updated", "other": "failed"})
+
+    def test_explicit_debug_success_resolves_mixed_session(self):
+        logs = '\n'.join([
+            'level=info msg="Found new image" container=app',
+            'level=info msg="Found new image" container=monitor',
+            'level=debug msg="Updated container" container=app',
+            'level=info msg="Update session completed" updated=1 failed=0',
+        ])
+        self.assertEqual(docker_helpers._parse_update_statuses(logs), {"app": "updated"})
+
+    def test_ambiguous_info_summary_never_invents_a_success(self):
+        logs = '\n'.join([
+            'level=info msg="Found new image" container=app',
+            'level=info msg="Found new image" container=monitor',
+            'level=info msg="Update session completed" updated=1 failed=0',
+        ])
         self.assertEqual(docker_helpers._parse_update_statuses(logs), {})
 
 

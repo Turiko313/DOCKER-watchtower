@@ -17,7 +17,7 @@ container_id=$(docker run --detach --read-only \
   --security-opt no-new-privileges:true --cap-drop ALL \
   --label com.centurylinklabs.watchtower.enable=false \
   --env CONFIG_DIR=/config \
-  --env WATCHTOWER_HTTP_API_ENDPOINTS=update,metrics \
+  --env WATCHTOWER_HTTP_API_ENDPOINTS=update,metrics,containers \
   --env WATCHTOWER_HTTP_API_PERIODIC_POLLS=true \
   --env WATCHTOWER_HTTP_API_TOKEN=test-watchtower-token-at-least-32-chars \
   --env WATCHTOWER_MONITOR_ONLY=true \
@@ -96,6 +96,16 @@ assert response.status_code == 200, response.status_code
 print("Dashboard authentication, pages and Watchtower metrics: OK")
 
 target, sibling = os.environ["TARGET_NAME"], os.environ["SIBLING_NAME"]
+response = requests.get(
+    "http://127.0.0.1:8080/v1/containers/details",
+    headers={"Authorization": "Bearer test-watchtower-token-at-least-32-chars"},
+    timeout=10,
+)
+assert response.status_code == 200, response.status_code
+watched = {c["name"].lstrip("/"): c for c in response.json()["containers"]}
+assert target not in watched, watched
+assert sibling in watched and watched[sibling]["monitor_only"], watched
+print("Watchtower effective selection: excluded target absent; monitored sibling present")
 client = docker.from_env()
 before = {name: client.containers.get(name).attrs["State"]["StartedAt"] for name in (target, sibling)}
 old_ids = {name: client.containers.get(name).image.id for name in (target, sibling)}

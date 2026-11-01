@@ -4,7 +4,10 @@ import os
 import sys
 import tempfile
 import unittest
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -30,12 +33,15 @@ watchtower_containers_updated 3
 watchtower_scans_skipped_total 2
 watchtower_containers_failed 1
 invalid_metric NaN
+invalid_infinite_metric +Inf
 """
         metrics = watchtower_api.parse_prometheus(text)
         self.assertEqual(metrics["watchtower_scans_total"], 12)
         self.assertEqual(metrics["watchtower_containers_updated"], 3)
         self.assertEqual(metrics["watchtower_scans_skipped_total"], 2)
         self.assertEqual(metrics["watchtower_containers_failed"], 1)
+        self.assertNotIn("invalid_metric", metrics)
+        self.assertNotIn("invalid_infinite_metric", metrics)
 
     def test_save_settings_invalid_cron_is_disabled(self):
         with tempfile.TemporaryDirectory() as td:
@@ -122,7 +128,7 @@ invalid_metric NaN
                 metrics = watchtower_api.get_watchtower_metrics()
 
                 self.assertEqual(metrics["watchtower_scans_total"], 0)
-                self.assertEqual(metrics["watchtower_containers_updated"], 0)
+                self.assertEqual(metrics["watchtower_containers_updated"], 3)
             finally:
                 watchtower_api.CONFIG_DIR = old_config_dir
                 watchtower_api.METRICS_FILE = old_metrics_file
@@ -150,6 +156,72 @@ invalid_metric NaN
                 watchtower_api.CONFIG_DIR = old_config_dir
                 watchtower_api.METRICS_FILE = old_metrics_file
                 watchtower_api._fetch_watchtower_metrics = old_fetch
+
+    def test_last_scan_gauges_are_not_accumulated_when_values_decrease(self):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.object(watchtower_api, "CONFIG_DIR", td),
+            patch.object(watchtower_api, "METRICS_FILE", os.path.join(td, "metrics.json")),
+            patch.object(watchtower_api, "_fetch_watchtower_metrics") as fetch,
+        ):
+            for scans, updated, failed in ((1, 3, 2), (2, 1, 1), (3, 1, 1), (4, 0, 0)):
+                fetch.return_value = dict(watchtower_scans_total=scans,
+                                          watchtower_containers_updated=updated,
+                                          watchtower_containers_failed=failed)
+                result = watchtower_api.get_watchtower_metrics()
+                self.assertEqual(result["watchtower_scans_total"], scans)
+                self.assertEqual(result["watchtower_containers_updated"], updated)
+                self.assertEqual(result["watchtower_containers_failed"], failed)
+
+    def test_legacy_gauge_history_migrates_and_survives_api_outage(self):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.object(watchtower_api, "CONFIG_DIR", td),
+            patch.object(watchtower_api, "METRICS_FILE", os.path.join(td, "metrics.json")),
+            patch.object(watchtower_api, "_fetch_watchtower_metrics", return_value=None),
+        ):
+            watchtower_api._save_metrics({
+                "watchtower_containers_updated": {"cumulative": 99, "last_seen": 2},
+            })
+            self.assertEqual(watchtower_api.get_watchtower_metrics()["watchtower_containers_updated"], 2)
+            self.assertEqual(watchtower_api._load_metrics()["watchtower_containers_updated"], {"last_value": 2})
+
+    def test_concurrent_requests_cannot_overwrite_newer_metrics(self):
+        first_loaded, release_first, second_fetched = (threading.Event() for _ in range(3))
+        original_load = watchtower_api._load_metrics
+        fetch_count = 0
+
+        def fetch():
+            nonlocal fetch_count
+            fetch_count += 1
+            if fetch_count > 1:
+                second_fetched.set()
+            return {"watchtower_scans_total": 11 + fetch_count}
+
+        def load():
+            state = original_load()
+            if not first_loaded.is_set():
+                first_loaded.set()
+                if not release_first.wait(5):
+                    raise RuntimeError("Timed out waiting for concurrent test")
+            return state
+
+        with (tempfile.TemporaryDirectory() as td,
+              patch.object(watchtower_api, "CONFIG_DIR", td),
+              patch.object(watchtower_api, "METRICS_FILE", os.path.join(td, "metrics.json")),
+              patch.object(watchtower_api, "_fetch_watchtower_metrics", side_effect=fetch),
+              patch.object(watchtower_api, "_load_metrics", side_effect=load),
+              ThreadPoolExecutor(max_workers=2) as pool):
+            first = pool.submit(watchtower_api.get_watchtower_metrics)
+            try:
+                self.assertTrue(first_loaded.wait(5))
+                second = pool.submit(watchtower_api.get_watchtower_metrics)
+                self.assertFalse(second_fetched.wait(.1), "The second request bypassed the metrics transaction")
+            finally:
+                release_first.set()
+            self.assertEqual(first.result()["watchtower_scans_total"], 12)
+            self.assertEqual(second.result()["watchtower_scans_total"], 13)
+            self.assertEqual(original_load()["watchtower_scans_total"], {"cumulative": 13, "last_seen": 13})
 
 
 if __name__ == "__main__":

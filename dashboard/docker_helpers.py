@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 import re
 import shlex
@@ -39,12 +40,6 @@ def list_containers():
                         image_name = c.image.tags[0] if c.image.tags else c.image.short_id
                 except Exception:
                     image_name = c.attrs.get("Config", {}).get("Image", "unknown")
-                wt_label = c.labels.get("com.centurylinklabs.watchtower.enable")
-                if wt_label is None:
-                    wt_enabled = True
-                else:
-                    wt_enabled = wt_label.lower() != "false"
-
                 state = c.attrs.get("State", {})
                 exit_code = state.get("ExitCode")
                 finished_at = state.get("FinishedAt", "")
@@ -58,7 +53,9 @@ def list_containers():
                     "image": image_name,
                     "status": c.status,
                     "id": c.short_id,
-                    "watchtower_enabled": wt_enabled,
+                    # Selection is supplied by the running Watchtower API,
+                    # which applies its state, label, scope and name filters.
+                    "watchtower_enabled": None,
                     "created": c.attrs.get("Created", "")[:19].replace("T", " "),
                     "exit_code": exit_code if c.status in ("exited", "dead") else None,
                     "finished_at": finished_at if c.status in ("exited", "dead") else "",
@@ -80,7 +77,7 @@ def list_containers():
                         "image": c.attrs.get("Config", {}).get("Image", "unknown"),
                         "status": _status,
                         "id": c.short_id or "?",
-                        "watchtower_enabled": False,
+                        "watchtower_enabled": None,
                         "created": c.attrs.get("Created", "")[:19].replace("T", " "),
                         "exit_code": _exit_code if _status in ("exited", "dead") else None,
                         "finished_at": _fin if _status in ("exited", "dead") else "",
@@ -154,7 +151,17 @@ def _watchtower_container(client):
 
 
 def _log_fields(line):
-    """Parse Watchtower logfmt fields while tolerating Supervisor prefixes."""
+    """Parse Watchtower JSON or logfmt, tolerating Supervisor prefixes."""
+    if line.startswith("{"):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            return {}
+        if not isinstance(record, dict):
+            return {}
+        fields = {key: str(value) for key, value in record.items()}
+        fields["msg"] = fields.get("msg", fields.get("message", ""))
+        return fields
     fields = {}
     try:
         tokens = shlex.split(_ANSI_ESCAPE_RE.sub("", line), posix=True)
@@ -203,6 +210,11 @@ def _parse_update_statuses(log_text):
 
         if message == "Found new image" and container_name:
             pending_updates.add(container_name)
+            failed_in_session.discard(container_name)
+            continue
+
+        if message == "Updated container" and container_name:
+            statuses[container_name] = "updated"
             failed_in_session.discard(container_name)
             continue
 

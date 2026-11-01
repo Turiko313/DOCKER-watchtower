@@ -26,6 +26,26 @@
 </div>
 {% endmacro %}
 
+{% macro watchtower_badge(c) %}
+  {% if c.watchtower_enabled is none %}
+    <span class="badge paused" title="Impossible de lire la sélection du moteur Watchtower. Vérifiez son état et l'API containers.">indisponible</span>
+  {% elif not c.watchtower_enabled %}
+    <span class="badge no" title="Exclu de la sélection courante du moteur : labels, filtres ou état du conteneur.">non</span>
+  {% elif c.watchtower_monitor_only %}
+    <span class="badge paused" title="Watchtower vérifie les images sans appliquer les mises à jour.">surveillance seule</span>
+  {% else %}
+    <span class="badge yes" title="Sélectionné par Watchtower pour les vérifications et mises à jour automatiques.">automatique</span>
+  {% endif %}
+  {% if c.watchtower_enabled and c.watchtower_no_pull %}
+    <span class="badge paused" title="Téléchargement désactivé : seules les images déjà présentes localement sont utilisées.">image locale</span>
+  {% endif %}
+  {% if update_statuses.get(c.name) == 'updated' %}
+    <span class="badge yes glow-green" title="Mise à jour confirmée dans les journaux des dernières 24 heures, y compris une action manuelle.">mis à jour ✓</span>
+  {% elif update_statuses.get(c.name) == 'failed' %}
+    <span class="badge no glow-red" title="Échec relevé dans les journaux des dernières 24 heures.">échec ✗</span>
+  {% endif %}
+{% endmacro %}
+
 <!-- Metrics -->
 <div class="metrics">
   <div class="metric-card">
@@ -41,12 +61,12 @@
     <div class="label">Arrêtés</div>
   </div>
   <div class="metric-card">
-    <div class="value">{{ containers|selectattr('watchtower_enabled')|list|length }}</div>
-    <div class="label">Surveilles</div>
+    <div class="value">{{ containers|selectattr('watchtower_enabled')|list|length if watchtower_available else '?' }}</div>
+    <div class="label">Surveillés</div>
   </div>
   <div class="metric-card">
     <div class="value">{{ metrics.get('watchtower_containers_updated', 0)|int }}</div>
-    <div class="label">Mis a jour</div>
+    <div class="label">Mis à jour · dernier scan</div>
   </div>
   <div class="metric-card">
     <div class="value">{{ metrics.get('watchtower_scans_total', 0)|int }}</div>
@@ -56,12 +76,11 @@
     <div class="value">{{ metrics.get('watchtower_scans_skipped_total', 0)|int }}</div>
     <div class="label">Scans ignores</div>
   </div>
-  {% set failed_count = update_statuses.values()|select('equalto','failed')|list|length %}
-  {% set total_failed = failed_count + metrics.get('watchtower_containers_failed', 0)|int %}
+  {% set total_failed = metrics.get('watchtower_containers_failed', 0)|int %}
   {% if total_failed > 0 %}
   <div class="metric-card" style="border-color:#da3633">
     <div class="value" style="color:#f85149">{{ total_failed }}</div>
-    <div class="label">Erreurs</div>
+    <div class="label">Échecs · dernier scan</div>
   </div>
   {% endif %}
 </div>
@@ -126,17 +145,7 @@
               {% endif %}
             </td>
             <td>
-              {% if c.watchtower_enabled %}
-                {% if update_statuses.get(c.name) == 'updated' %}
-                  <span class="badge yes glow-green" title="Mis a jour dans les 24h">oui ✓</span>
-                {% elif update_statuses.get(c.name) == 'failed' %}
-                  <span class="badge yes glow-red" title="Echec de mise a jour">oui ✗</span>
-                {% else %}
-                  <span class="badge yes">oui</span>
-                {% endif %}
-              {% else %}
-                <span class="badge no">non</span>
-              {% endif %}
+              {{ watchtower_badge(c) }}
             </td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.created }}</td>
           </tr>
@@ -154,7 +163,17 @@
                 <span class="badge exited" style="margin-left:.25rem">{{ stopped }} arrêté{{ 's' if stopped > 1 }}</span>
               {% endif %}
             </td>
-            <td></td>
+            <td>
+              {% if watchtower_available %}
+                {% set selected = group|selectattr('watchtower_enabled')|list %}
+                {% set monitored = selected|selectattr('watchtower_monitor_only')|list|length %}
+                <span class="badge {{ 'yes' if selected else 'no' }}">{{ selected|length }}/{{ group|length }} surveillés</span>
+                {% if selected|length > monitored %}<div class="watchtower-detail">{{ selected|length - monitored }} automatique(s)</div>{% endif %}
+                {% if monitored %}<div class="watchtower-detail">{{ monitored }} en surveillance seule</div>{% endif %}
+              {% else %}
+                <span class="badge paused">indisponible</span>
+              {% endif %}
+            </td>
             <td></td>
           </tr>
           {% for c in group %}
@@ -173,17 +192,7 @@
               {% endif %}
             </td>
             <td>
-              {% if c.watchtower_enabled %}
-                {% if update_statuses.get(c.name) == 'updated' %}
-                  <span class="badge yes glow-green" title="Mis a jour dans les 24h">oui ✓</span>
-                {% elif update_statuses.get(c.name) == 'failed' %}
-                  <span class="badge yes glow-red" title="Echec de mise a jour">oui ✗</span>
-                {% else %}
-                  <span class="badge yes">oui</span>
-                {% endif %}
-              {% else %}
-                <span class="badge no">non</span>
-              {% endif %}
+              {{ watchtower_badge(c) }}
             </td>
             <td style="font-size:.85rem;color:#8b949e">{{ c.created }}</td>
           </tr>
@@ -193,6 +202,7 @@
     </tbody>
   </table>
   </div>
+  <p class="watchtower-detail">Watchtower indique la sélection automatique actuelle. Les boutons « Mettre à jour » fonctionnent aussi pour les conteneurs exclus. Les résultats affichés proviennent des journaux des dernières 24 h.</p>
   <p class="action-legend"><span>Prêt</span><span class="legend-success">Réussi · 2 min</span><span class="legend-error">Échec · réessayer</span></p>
 </div>
 

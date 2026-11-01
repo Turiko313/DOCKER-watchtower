@@ -29,6 +29,13 @@ try:
 
     # Schedule or poll interval (mutually exclusive)
     schedule = " ".join(s.get("schedule", "").split())
+    # Share validation with the form, including configurations saved by older
+    # versions, so an invalid schedule cannot prevent Watchtower from starting.
+    sys.path.insert(0, "/app")
+    from settings import valid_schedule
+    if not valid_schedule(schedule):
+        print("[start_watchtower] Invalid cron schedule; using poll interval.", file=sys.stderr)
+        schedule = ""
     if schedule:
         os.environ["WATCHTOWER_SCHEDULE"] = schedule
         os.environ.pop("WATCHTOWER_POLL_INTERVAL", None)
@@ -85,6 +92,14 @@ except Exception as exc:
 # CRITICAL: Since we use WATCHTOWER_HTTP_API_UPDATE=true, Watchtower normally
 # disables background polling. We MUST force periodic polls back on.
 os.environ["WATCHTOWER_HTTP_API_PERIODIC_POLLS"] = "true"
+
+# The dashboard reads the engine's effective selection, including its filters.
+# Also enable it for installations still using the previous Compose file.
+api_endpoints = os.environ.get("WATCHTOWER_HTTP_API_ENDPOINTS", "update,metrics")
+api_endpoints = [value.strip() for value in api_endpoints.split(",") if value.strip()]
+if "containers" not in api_endpoints:
+    api_endpoints.append("containers")
+os.environ["WATCHTOWER_HTTP_API_ENDPOINTS"] = ",".join(api_endpoints)
 
 # ---------------------------------------------------------------------------
 # GHCR private registry authentication
